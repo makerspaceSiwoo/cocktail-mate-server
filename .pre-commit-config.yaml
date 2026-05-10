@@ -1,0 +1,18 @@
+repos:
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.15.12
+    hooks:
+      - id: ruff
+        args: [--fix]
+      - id: ruff-format
+
+  - repo: local
+    hooks:
+      - id: validate-branch-name
+        name: Validate branch name
+        language: system
+        stages: [pre-push]
+        always_run: true
+        pass_filenames: false
+        entry: |
+          bash -c 'b=$(git rev-parse --abbrev-ref HEAD); [[ "$b" =~ ^(main|develop|(feat|fix|hotfix|chore|docs|refactor|test)/[a-z0-9._-]+)$ ]] || { echo "❌ 잘못된 브랜치명입니다. 허용 패턴 - main, develop, (feat|fix|hotfix|chore|docs|refactor|test)/소문자-슬러그"; exit 1; }'
