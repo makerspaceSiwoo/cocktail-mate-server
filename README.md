@@ -9,9 +9,6 @@
     ex) [Feat] 유저정보 CRUD 구현
 
 3) 해당 issue에 대응되는 branch 생성 후 Notion Table에 branch 명 추가 
-    (branch는 최소한 dev branch에서 분기할것!
-    작업전 pull 필수! 
-    main은 실행 가능한 상태유지해야 할 수 있기 때문)
 
    branch 명은 [issue 작업범주]/#[issue num]-~~ (영어로 작성)
    ex) issue number 1이 유저정보 crud 구현이라면 해당 이슈 branch 명은
