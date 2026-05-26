@@ -18,6 +18,9 @@
         feat/#1-userInfo-crud
 
 4) 해당 branch에서 작업 후 로컬 테스트
+로컬 테스트 방법은 
+    3.로컬 환경 세팅 및 테스트 방법
+에 나와있습니다. 
 
 5) 로컬 테스트 통과시 PR
 
@@ -39,3 +42,25 @@
 | Remove | 파일을 삭제하는 작업만 수행한 경우 |
 | !BREAKING CHANGE | 커다란 API 변경의 경우 |
 | !HOTFIX | 급하게 치명적인 버그를 고쳐야 하는 경우 |
+
+## 3. 로컬 환경 세팅 및 테스트 방법
+0) 요구사항
+Docker를 설치해주시기 바랍니다.
+아래 명령어들을 실행하려면 Docker가 실행중 이어야합니다. 
+
+1) 환경 세팅
+모두 동일한 환경에서 개발을 진행하기 위해 Dockerfile로 환경을 구성했습니다.
+
+아래는 간략하게 실행할 수 있도록 명령어들을 나열해 놨습니다. 
+기타 자세한 사항은 Makefile을 참고하시면 됩니다.
+어
+
+2) 환경 세팅 명령어 흐름
+make up: Docker 컨테이너들 실행
+make shell: 서버 컨테이너 접속
+make db-shell: MySQL 컨테이너 접속 및 실행
+
+3) 테스트
+make check: 컴파일이 되는지 체크
+Swagger: http://localhost:8000/docs 접속
+make test: /tests의 테스트들 시행
