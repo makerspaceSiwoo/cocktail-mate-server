@@ -16,6 +16,35 @@ def root():
             "cocktailName": "마가리타"
             }
 
+
+@app.post("/signup")
+def signup():
+    return {
+        "userId": 1,
+        "nickname": "mockUser",
+        "email": "mock@example.com",
+        "message": "회원가입 성공"
+    }
+
+
+@app.post("/login")
+def login():
+    return {
+        "userId": 1,
+        "nickname": "mockUser",
+        "email": "mock@example.com",
+        "accessToken": "mock-access-token",
+        "message": "로그인 성공"
+    }
+
+
+@app.post("/logout")
+def logout():
+    return {
+        "message": "로그아웃 성공"
+    }
+
+
 # 칵테일 id
 
 # 쿠키 - userId
