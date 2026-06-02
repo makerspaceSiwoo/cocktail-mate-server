@@ -16,6 +16,11 @@ def root():
             "cocktailName": "마가리타"
             }
 
+@app.get("/search")
+def root():
+    return {"totalSearchNum": 10,
+            
+            }
 # 칵테일 id
 
 # 쿠키 - userId
