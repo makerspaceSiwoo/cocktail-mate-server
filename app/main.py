@@ -40,7 +40,7 @@ def login():
 @app.post("/logout")
 def logout():
     return {
-        "message": "로그아웃 성공"
+        "message": "로그아웃 성공",
         "profileImageUrl": "https://fastly.picsum.photos/id/64/200/200.jpg"
     }
 
