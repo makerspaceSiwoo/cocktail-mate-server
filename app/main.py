@@ -8,13 +8,41 @@ def root():
     return {"message": "Hello World"}
 
 
-
 @app.get("/cocktail/{id}")
 def root():
     return {"cocktailId": 123,
             "imageUrl" : "https://fastly.picsum.photos/id/73/200/200.jpg?hmac=IYjgRq-Ok9gn3_MVxJ4TlfhLPONQ97qWvp2Ir1Y1z6c",
             "cocktailName": "마가리타"
             }
+
+
+@app.post("/signup")
+def signup():
+    return {
+        "userId": 1,
+        "nickname": "mockUser",
+        "email": "mock@example.com",
+        "message": "회원가입 성공"
+    }
+
+
+@app.post("/login")
+def login():
+    return {
+        "userId": 1,
+        "nickname": "mockUser",
+        "email": "mock@example.com",
+        "accessToken": "mock-access-token",
+        "message": "로그인 성공"
+    }
+
+
+@app.post("/logout")
+def logout():
+    return {
+        "message": "로그아웃 성공"
+        "profileImageUrl": "https://fastly.picsum.photos/id/64/200/200.jpg"
+    }
 
 
 @app.get("/my/info")
