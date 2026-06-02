@@ -1,6 +1,103 @@
 from fastapi import FastAPI
+from pydantic import BaseModel
 
 app = FastAPI()
+
+
+class SignupRequest(BaseModel):
+    email: str
+    password: str
+    nickname: str
+
+
+class LoginRequest(BaseModel):
+    email: str
+    password: str
+
+
+class UserResponse(BaseModel):
+    userId: int
+    nickname: str
+    email: str
+    profileImageUrl: str | None = None
+
+
+class SignupResponse(BaseModel):
+    user: UserResponse
+    message: str
+
+
+class LoginResponse(BaseModel):
+    user: UserResponse
+    accessToken: str
+    message: str
+
+
+class MessageResponse(BaseModel):
+    message: str
+
+
+class CocktailLikeItemResponse(BaseModel):
+    cocktailId: int
+    cocktailName: str
+    imageUrl: str
+    baseTag: str
+    likeCount: int
+    isLiked: bool
+
+
+class LikeListResponse(BaseModel):
+    cocktails: list[CocktailLikeItemResponse]
+
+
+class LikeResponse(BaseModel):
+    cocktailId: int
+    isLiked: bool
+    likeCount: int
+    message: str
+
+
+class CocktailSimpleResponse(BaseModel):
+    cocktailId: int
+    imageUrl: str
+    cocktailName: str
+
+
+class CocktailListItemResponse(BaseModel):
+    id: int
+    imageUrl: str
+    name: str
+    baseTag: str
+    description: str
+    ABV: float
+    numLike: int
+
+
+class SearchCocktailResponse(BaseModel):
+    total: int
+    cocktails: list[CocktailListItemResponse]
+
+
+class ExploreCocktailResponse(BaseModel):
+    cocktailId: int
+    cocktailName: str
+    imageUrl: str
+    glass: str
+    ABV: float
+    numLike: int
+    recipe: str
+    description: str
+    baseTag: str
+    isLiked: bool
+
+
+class DrinkOfTheDayResponse(BaseModel):
+    cocktailId: int
+    cocktailName: str
+    imageUrl: str
+    description: str
+    ABV: float
+
 
 mock_cocktails = [
     {
@@ -32,20 +129,16 @@ mock_cocktails = [
     },
 ]
 
-@app.get("/")
-def root():
-    return {"message": "Hello World"}
 
-
-@app.get("/cocktail/{id}")
-def root():
+@app.get("/cocktail/{id}", response_model=CocktailSimpleResponse)
+def get_cocktail(id: int):
     return {"cocktailId": id,
             "imageUrl" : "https://fastly.picsum.photos/id/73/200/200.jpg?hmac=IYjgRq-Ok9gn3_MVxJ4TlfhLPONQ97qWvp2Ir1Y1z6c",
             "cocktailName": "마가리타"
             }
     
 
-@app.get("/search")
+@app.get("/search", response_model=SearchCocktailResponse)
 def search_cocktails(keyword: str = "", page: int = 1, rpp: int = 10):
     filtered = [
         cocktail for cocktail in mock_cocktails
@@ -65,11 +158,21 @@ def search_cocktails(keyword: str = "", page: int = 1, rpp: int = 10):
         "cocktails": paged_items
     }
 
-@app.get("/list")
-def cockailLists():
-    return mock_cocktails
-@app.get("/explore/{id}")
-def root():
+
+@app.get("/list", response_model=list[CocktailSimpleResponse])
+def cocktail_lists():
+    return [
+        {
+            "cocktailId": cocktail["id"],
+            "imageUrl": cocktail["imageUrl"],
+            "cocktailName": cocktail["name"]
+        }
+        for cocktail in mock_cocktails
+    ]
+
+
+@app.get("/explore/{id}", response_model=ExploreCocktailResponse)
+def get_explore_cocktail(id: int):
     return{
             "cocktailId": id,
             "cocktailName": "cocktailtail",
@@ -83,36 +186,41 @@ def root():
             "isLiked": False
     }
 
-@app.post("/signup")
-def signup():
+@app.post("/signup", response_model=SignupResponse)
+def signup(request: SignupRequest):
     return {
-        "userId": 1,
-        "nickname": "mockUser",
-        "email": "mock@example.com",
+        "user": {
+            "userId": 1,
+            "nickname": request.nickname,
+            "email": request.email,
+            "profileImageUrl": None
+        },
         "message": "회원가입 성공"
     }
 
 
-@app.post("/login")
-def login():
+@app.post("/login", response_model=LoginResponse)
+def login(request: LoginRequest):
     return {
-        "userId": 1,
-        "nickname": "mockUser",
-        "email": "mock@example.com",
+        "user": {
+            "userId": 1,
+            "nickname": "mockUser",
+            "email": request.email,
+            "profileImageUrl": "https://fastly.picsum.photos/id/64/200/200.jpg"
+        },
         "accessToken": "mock-access-token",
         "message": "로그인 성공"
     }
 
 
-@app.post("/logout")
+@app.post("/logout", response_model=MessageResponse)
 def logout():
     return {
-        "message": "로그아웃 성공",
-        "profileImageUrl": "https://fastly.picsum.photos/id/64/200/200.jpg"
+        "message": "로그아웃 성공"
     }
 
 
-@app.get("/my/info")
+@app.get("/my/info", response_model=UserResponse)
 def get_my_info():
     return {
         "userId": 1,
@@ -122,7 +230,7 @@ def get_my_info():
     }
 
 
-@app.get("/like/list")
+@app.get("/like/list", response_model=LikeListResponse)
 def get_like_list():
     return {
         "cocktails": [
@@ -130,15 +238,15 @@ def get_like_list():
                 "cocktailId": 1,
                 "cocktailName": "마가리타",
                 "imageUrl": "https://fastly.picsum.photos/id/73/200/200.jpg",
-                "baseTag": "데킬라",
+                "baseTag": "tequila",
                 "likeCount": 128,
                 "isLiked": True
             },
             {
                 "cocktailId": 2,
-                "cocktailName": "모히토",
+                "cocktailName": "모히또",
                 "imageUrl": "https://fastly.picsum.photos/id/106/200/200.jpg",
-                "baseTag": "럼",
+                "baseTag": "rum",
                 "likeCount": 95,
                 "isLiked": True
             }
@@ -146,28 +254,28 @@ def get_like_list():
     }
 
 
-@app.post("/like")
-def like_cocktail():
+@app.post("/cocktails/{cocktail_id}/like", response_model=LikeResponse)
+def like_cocktail(cocktail_id: int):
     return {
-        "cocktailId": 1,
+        "cocktailId": cocktail_id,
         "isLiked": True,
         "likeCount": 129,
         "message": "좋아요 성공"
     }
 
 
-@app.delete("/unlike")
-def unlike_cocktail():
+@app.delete("/cocktails/{cocktail_id}/like", response_model=LikeResponse)
+def unlike_cocktail(cocktail_id: int):
     return {
-        "cocktailId": 1,
+        "cocktailId": cocktail_id,
         "isLiked": False,
         "likeCount": 128,
         "message": "좋아요 취소 성공"
     }
 
 
-@app.get("/drink-of-the-day")
-def root():
+@app.get("/drink-of-the-day", response_model=DrinkOfTheDayResponse)
+def get_drink_of_the_day():
     return {
         "cocktailId": 123,
         "cocktailName": "magarita",
@@ -175,13 +283,3 @@ def root():
         "description": "salty, sugary",
         "ABV": 21.3,
         }
-# 칵테일 id
-
-# 쿠키 - userId
-
-# 응답
-
-# 칵테일 정보 {
-# id, 이미지, 이름, 베이스 태그(무알콜,럼,진,…), 설명,
-# 도수, 좋아요 수 , 유저 좋아요 여부, 레시피
-# }
