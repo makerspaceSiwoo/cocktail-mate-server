@@ -10,11 +10,25 @@ def root():
 
 @app.get("/cocktail/{id}")
 def root():
-    return {"cocktailId": 123,
+    return {"cocktailId": id,
             "imageUrl" : "https://fastly.picsum.photos/id/73/200/200.jpg?hmac=IYjgRq-Ok9gn3_MVxJ4TlfhLPONQ97qWvp2Ir1Y1z6c",
             "cocktailName": "마가리타"
             }
 
+@app.get("/explore/{id}")
+def root():
+    return{
+            "cocktailId": id,
+            "cocktailName": "cocktailtail",
+            "imageUrl": "https://fastly.picsum.photos/id/73/200/200.jpg?hmac=IYjgRq-Ok9gn3_MVxJ4TlfhLPONQ97qWvp2Ir1Y1z6c",
+            "glass": "glass1",
+            "ABV": 21.3,
+            "numLike": 10,
+            "recipe": "mix",
+            "description": "salty, sugary",
+            "baseTag": "rum",
+            "isLiked": False
+    }
 
 @app.post("/signup")
 def signup():
