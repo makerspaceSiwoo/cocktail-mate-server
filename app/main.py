@@ -16,6 +16,15 @@ def root():
             "cocktailName": "마가리타"
             }
 
+@app.get("/drink-of-the-day")
+def root():
+    return {
+        "cocktailId": 123,
+        "cocktailName": "magarita",
+        "imageUrl":"https://fastly.picsum.photos/id/73/200/200.jpg?hmac=IYjgRq-Ok9gn3_MVxJ4TlfhLPONQ97qWvp2Ir1Y1z6c", 
+        "description": "salty, sugary",
+        "ABV": 21.3,
+        }
 # 칵테일 id
 
 # 쿠키 - userId
