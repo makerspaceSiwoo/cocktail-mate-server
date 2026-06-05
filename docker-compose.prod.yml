@@ -1,0 +1,34 @@
+# Oracle Always Free 인스턴스 배포용 스택.
+# 이미지 저장은 Oracle Object Storage(S3 호환)를 사용하므로 MinIO는 포함하지 않는다.
+# 스토리지 접속값(STORAGE_*)은 .env에 Oracle Object Storage 값으로 채운다 (DEPLOY.md 참고).
+#
+# 실행: docker compose -f docker-compose.prod.yml up -d --build
+services:
+
+  api:
+    build: .
+    container_name: fastapi-server
+    restart: always
+    ports:
+      - "80:8000"        # 외부 80 → 컨테이너 8000
+    env_file:
+      - .env
+    depends_on:
+      - db
+
+  db:
+    image: pgvector/pgvector:pg16
+    container_name: postgres-db
+    restart: always
+    env_file:
+      - .env
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./db/init:/docker-entrypoint-initdb.d
+
+volumes:
+  postgres_data:

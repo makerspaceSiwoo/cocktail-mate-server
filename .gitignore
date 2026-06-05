@@ -149,6 +149,7 @@ activemq-data/
 
 # Environments
 .env
+!.env.example
 .envrc
 .venv
 env/
@@ -216,3 +217,19 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Terraform (state/변수에 비밀값 포함 — 절대 커밋 금지)
+**/.terraform/*
+*.tfstate
+*.tfstate.*
+crash.log
+crash.*.log
+*.tfvars
+*.tfvars.json
+!*.tfvars.example
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+.terraform.lock.hcl
+*.pem

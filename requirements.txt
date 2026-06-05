@@ -1,6 +1,10 @@
 fastapi
-uvicorn
+uvicorn[standard]
 pytest
 sqlalchemy
-pymysql
+psycopg2-binary
+pgvector
 python-dotenv
+pydantic-settings
+boto3
+python-multipart
