@@ -47,7 +47,7 @@ OCI 콘솔 우측 상단 프로필 → **내 프로필** → 좌측 **API 키** 
 ## 3. Terraform 으로 인프라 생성
 
 ```bash
-cd infra/terraform
+cd infra/oracle/terraform
 cp terraform.tfvars.example terraform.tfvars
 ```
 
@@ -170,7 +170,7 @@ curl http://<instance_public_ip>/health
   ```bash
   git pull && docker compose -f docker-compose.prod.yml up -d --build
   ```
-- **전체 삭제(과금 방지 확실히)**: 로컬에서 `cd infra/terraform && terraform destroy`.
+- **전체 삭제(과금 방지 확실히)**: 로컬에서 `cd infra/oracle/terraform && terraform destroy`.
 - **비용**: 위 리소스(A1 4 OCPU/24GB 한도 내, Object Storage 20GB 한도 내)는 **Always Free**입니다.
   단, 한도를 초과하거나 계정을 유료 업그레이드하면 과금될 수 있으니 콘솔의 **Cost/Usage**를 가끔 확인하세요.
 

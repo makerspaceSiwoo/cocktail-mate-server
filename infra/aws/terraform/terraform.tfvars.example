@@ -1,0 +1,22 @@
+# 복사해서 사용: cp terraform.tfvars.example terraform.tfvars
+# terraform.tfvars 는 .gitignore 처리됨 (커밋 금지).
+#
+# AWS 인증은 이 파일이 아니라 aws configure / 환경변수로 합니다 (아래 README 참고).
+
+# 🟢 리전 (기본: 서울)
+region = "ap-northeast-2"
+
+# 🟢 (선택) 특정 AWS CLI 프로필 사용 시 지정. 기본 자격증명이면 비워둠.
+# aws_profile = "default"
+
+# 🟢 EC2에 등록할 SSH 공개키 (cat ~/.ssh/id_ed25519.pub 한 줄 전체)
+ssh_public_key = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5... seeyouspace0@gmail.com"
+
+# 🟡 (권장) SSH 허용 IP를 본인 것으로 제한. curl ifconfig.me 로 내 IP 확인 후 /32.
+#     미설정 시 전체(0.0.0.0/0) 허용.
+# ssh_allowed_cidr = "1.2.3.4/32"
+
+# ---- (선택) 기타 ----
+# instance_type  = "t2.micro"
+# ubuntu_version = "24.04"
+# project_name   = "cocktail-mate"

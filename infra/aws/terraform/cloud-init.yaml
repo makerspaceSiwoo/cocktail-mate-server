@@ -1,0 +1,25 @@
+#cloud-config
+# 부팅 시 1회 실행: Docker 설치 + swap 2GB 생성.
+# AWS는 보안 그룹으로 방화벽이 처리되므로 인스턴스 내부 iptables 작업은 불필요.
+package_update: true
+package_upgrade: false
+
+packages:
+  - ca-certificates
+  - curl
+
+runcmd:
+  # --- Docker Engine + compose plugin 설치 ---
+  - curl -fsSL https://get.docker.com -o /tmp/get-docker.sh
+  - sh /tmp/get-docker.sh
+  - usermod -aG docker ubuntu
+  - systemctl enable --now docker
+
+  # --- swap 2GB (t2.micro RAM 1GB 보완: postgres+pgvector+fastapi 동시 구동) ---
+  - fallocate -l 2G /swapfile
+  - chmod 600 /swapfile
+  - mkswap /swapfile
+  - swapon /swapfile
+  - bash -c 'echo "/swapfile none swap sw 0 0" >> /etc/fstab'
+
+  - echo "cloud-init done" > /var/log/cocktail-mate-init.log
