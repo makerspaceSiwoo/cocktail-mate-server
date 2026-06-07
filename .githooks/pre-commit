@@ -1,0 +1,13 @@
+#!/bin/sh
+# 커밋 전: 브랜치명 검증
+# 활성화: make hooks  (git config core.hooksPath .githooks)
+
+branch=$(git rev-parse --abbrev-ref HEAD)
+pattern='^(main|develop|(feat|fix|hotfix|chore|docs|refactor|test|other)/[a-z0-9._-]+)$'
+
+if ! echo "$branch" | grep -qE "$pattern"; then
+  echo "❌ 잘못된 브랜치명입니다: $branch"
+  echo "   허용 패턴: main | develop | (feat|fix|hotfix|chore|docs|refactor|test|other)/소문자-슬러그"
+  echo "   예) feat/cm-40-user-api , other/cm-32-setup-server"
+  exit 1
+fi

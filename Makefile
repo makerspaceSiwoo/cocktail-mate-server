@@ -1,4 +1,4 @@
-.PHONY: up up-d down logs rebuild shell check test db-shell prod-up prod-down
+.PHONY: up up-d down logs rebuild shell check test db-shell prod-up prod-down hooks
 
 # Docker 컨테이너들 실행 (로컬: api + postgres + minio)
 up:
@@ -44,3 +44,10 @@ prod-up:
 # 배포 종료
 prod-down:
 	docker compose -f docker-compose.prod.yml down
+
+# --- Git hooks (최초 1회 실행) ---
+# 브랜치명 검증(pre-commit) + main push 차단·build 체크(pre-push) 활성화
+hooks:
+	git config core.hooksPath .githooks
+	chmod +x .githooks/*
+	@echo "✅ git hooks 활성화됨 (.githooks)"

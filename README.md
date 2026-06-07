@@ -55,9 +55,18 @@ Docker를 설치해주시기 바랍니다.
 2) 환경 세팅 명령어 흐름
 make up: Docker 컨테이너들 실행
 make shell: 서버 컨테이너 접속
-make db-shell: MySQL 컨테이너 접속 및 실행
+make db-shell: PostgreSQL(pgvector) 컨테이너 접속
 
 3) 테스트
 make check: 컴파일이 되는지 체크
 Swagger: http://localhost:8000/docs 접속
 make test: /tests의 테스트들 시행
+
+## 4. Git Hooks (협업 규칙, 최초 1회 설정)
+레포 클론 후 한 번 실행하세요:
+
+    make hooks
+
+- **pre-commit**: 브랜치명 규칙 검증
+- **pre-push**: main 직접 push 차단 + 브랜치명 검증 + build(컴파일) 체크
+- 허용 브랜치명: `main | develop | (feat|fix|hotfix|chore|docs|refactor|test|other)/소문자-슬러그`
