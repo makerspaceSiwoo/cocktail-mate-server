@@ -28,6 +28,19 @@ class Settings(BaseSettings):
     storage_bucket: str = "cocktail-images"
     storage_public_base_url: str = "http://localhost:9000/cocktail-images"
 
+    # ---- CORS ----
+    # production 에서 허용할 프론트 origin 목록(콤마 구분). 예) "https://foo.vercel.app"
+    # 개발 환경(app_env != production)에서는 localhost 모든 포트가 자동 허용된다.
+    cors_origins: str = ""
+
+    @property
+    def cors_origin_list(self) -> list[str]:
+        return [o.strip() for o in self.cors_origins.split(",") if o.strip()]
+
+    @property
+    def is_production(self) -> bool:
+        return self.app_env.lower() == "production"
+
 
 @lru_cache
 def get_settings() -> Settings:

@@ -8,6 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import text
 
 from app.cocktail.router import router as cocktail_router
+from app.core.config import get_settings
 from app.core.database import engine
 from app.core.storage import check_bucket
 from app.like.router import router as like_router
@@ -17,13 +18,17 @@ from app.user.router import router as user_router
 def create_app() -> FastAPI:
     app = FastAPI(title="cocktail-mate-server")
 
-    app.add_middleware(
-        CORSMiddleware,
-        allow_origins=["*"],
-        allow_credentials=True,
-        allow_methods=["*"],
-        allow_headers=["*"],
-    )
+    settings = get_settings()
+    cors_kwargs: dict = {
+        "allow_origins": settings.cors_origin_list,
+        "allow_credentials": True,
+        "allow_methods": ["*"],
+        "allow_headers": ["*"],
+    }
+    if not settings.is_production:
+        # 개발 환경: localhost / 127.0.0.1 의 모든 포트(3000, 6006 등)를 자동 허용
+        cors_kwargs["allow_origin_regex"] = r"https?://(localhost|127\.0\.0\.1)(:\d+)?"
+    app.add_middleware(CORSMiddleware, **cors_kwargs)
 
     app.include_router(cocktail_router)
     app.include_router(user_router)
