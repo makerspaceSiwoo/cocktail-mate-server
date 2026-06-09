@@ -1,0 +1,7 @@
+# Caddy 리버스 프록시 — nip.io 도메인으로 Let's Encrypt 인증서 자동 발급/갱신.
+# 도메인을 바꾸려면 아래 호스트명만 교체하면 된다 (예: api.example.com).
+# nip.io: <대시구분 IP>.nip.io 가 해당 IP로 자동 resolve → 도메인 구매 불필요.
+
+152-69-225-226.nip.io {
+	reverse_proxy api:8000
+}

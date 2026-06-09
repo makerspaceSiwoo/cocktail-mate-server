@@ -46,6 +46,22 @@ services:
     volumes:
       - minio_data:/data
 
+  # 로컬 개발 중 외부에서 API를 호출해볼 수 있게 하는 ngrok 터널 (opt-in).
+  #   1) .env 에 NGROK_AUTHTOKEN 설정 (https://dashboard.ngrok.com/get-started/your-authtoken)
+  #   2) docker compose --profile tunnel up -d
+  #   3) 공개 URL 확인: docker compose logs ngrok  → msg="started tunnel" ... url=https://xxxx.ngrok-free.app
+  #   profiles 로 묶여 있어 평소 `up` 에는 안 뜨고 `--profile tunnel` 일 때만 기동된다.
+  ngrok:
+    image: ngrok/ngrok:latest
+    container_name: ngrok
+    restart: unless-stopped
+    profiles: ["tunnel"]
+    command: ["http", "api:8000", "--log", "stdout"]
+    environment:
+      NGROK_AUTHTOKEN: ${NGROK_AUTHTOKEN:-}
+    depends_on:
+      - api
+
   # 버킷 자동 생성 + 공개 읽기 정책 부여 (1회성 실행 후 종료)
   createbuckets:
     image: minio/mc
