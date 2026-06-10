@@ -10,10 +10,12 @@ output "ssh_command" {
   value       = "ssh ubuntu@${oci_core_instance.server.public_ip}"
 }
 
+# 오브젝트 스토리지 네임스페이스(참고용)
 output "object_storage_namespace" {
   value = data.oci_objectstorage_namespace.ns.namespace
 }
 
+# .env STORAGE_BUCKET 값
 output "bucket_name" {
   value = oci_objectstorage_bucket.images.name
 }

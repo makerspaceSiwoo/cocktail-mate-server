@@ -46,10 +46,15 @@ compartment_ocid = "ocid1.tenancy.oc1..xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
 ssh_public_key = "ssh-ed25519 AAAAC3NzaC1lZDI1... your_name@your_mac"
 
 
-# ---- (선택) 컴퓨트 크기 / Ubuntu 버전 ---------------------------------------
-# Always Free ARM 한도: 합산 4 OCPU / 24GB. 미설정 시 기본 2 OCPU / 12GB.
-# instance_ocpus      = 2
-# instance_memory_gbs = 12
+# ---- (보안) SSH 접속 허용 IP ------------------------------------------------
+# 🟡 미설정 시 전체(0.0.0.0/0) 허용. 본인 IP만 열려면 주석 해제 (curl ifconfig.me 로 확인).
+# ssh_allowed_cidr = "1.2.3.4/32"
+
+# ---- (선택·비용안전) 컴퓨트 크기 — Always Free 한도(합산 4 OCPU/24GB, 부트 200GB) ----
+# 미설정 시 기본 1 OCPU / 6GB / 부트 50GB (모두 무료). 한도 밖 값은 terraform 이 거부함.
+# instance_ocpus      = 1
+# instance_memory_gbs = 6
+# boot_volume_gbs     = 50
 # ubuntu_version      = "24.04"
 
 # ---- (선택) 이미지 버킷 이름 ------------------------------------------------
