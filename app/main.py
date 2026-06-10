@@ -16,9 +16,15 @@ from app.user.router import router as user_router
 
 
 def create_app() -> FastAPI:
-    app = FastAPI(title="cocktail-mate-server")
-
     settings = get_settings()
+
+    # production 에서는 /docs, /redoc, /openapi.json 비공개 (API 구조 정보 노출 차단)
+    docs_kwargs: dict = (
+        {"docs_url": None, "redoc_url": None, "openapi_url": None}
+        if settings.is_production
+        else {}
+    )
+    app = FastAPI(title="cocktail-mate-server", **docs_kwargs)
     cors_kwargs: dict = {
         "allow_origins": settings.cors_origin_list,
         "allow_credentials": True,
