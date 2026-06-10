@@ -9,7 +9,7 @@
 services:
 
   caddy:
-    image: caddy:2
+    build: ./caddy   # rate_limit 모듈 포함 커스텀 빌드 (caddy/Dockerfile)
     container_name: caddy
     restart: always
     ports:
