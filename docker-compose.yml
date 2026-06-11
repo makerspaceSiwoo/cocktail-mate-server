@@ -1,9 +1,13 @@
-# 로컬 개발용 스택: FastAPI + PostgreSQL(pgvector) + MinIO(S3 호환 스토리지)
+# 로컬 개발용 스택: FastAPI 단독.
+# DB는 OCI 원격 개발 DB에 직접 접속한다 — .env의 DATABASE_URL(공인 IP)만 있으면 끝.
+# (DB 운영/스키마는 cocktail-mate-db private 레포 담당)
 # 프로덕션(Oracle) 배포는 docker-compose.prod.yml 사용.
 services:
 
   api:
-    build: .
+    build:
+      context: .
+      ssh: ["default"]   # cocktail-mate-db(private) 설치용 — 호스트 ssh-agent의 GitHub 키 사용
     container_name: fastapi-server
     ports:
       - "8000:8000"
@@ -11,31 +15,16 @@ services:
       - .:/app            # 핫리로드(개발 편의)
     env_file:
       - .env
-    depends_on:
-      - db
-      - minio
 
-  db:
-    image: pgvector/pgvector:pg16
-    container_name: postgres-db
-    restart: always
-    env_file:
-      - .env
-    environment:
-      POSTGRES_DB: ${POSTGRES_DB}
-      POSTGRES_USER: ${POSTGRES_USER}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
-    ports:
-      - "5432:5432"
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
-      - ./db/init:/docker-entrypoint-initdb.d   # 최초 1회 pgvector 확장 생성
-
-  # 로컬에서 Oracle Object Storage를 대체하는 S3 호환 스토리지
+  # (opt-in) 오프라인 작업용 로컬 S3 호환 스토리지. 평소엔 .env의 STORAGE_*가
+  # Oracle Object Storage를 가리키므로 필요 없다.
+  #   docker compose --profile local-storage up -d
+  #   버킷 생성은 minio 콘솔(localhost:9001)에서 수동으로.
   minio:
     image: minio/minio
     container_name: minio
     restart: always
+    profiles: ["local-storage"]
     command: server /data --console-address ":9001"
     environment:
       MINIO_ROOT_USER: ${STORAGE_ACCESS_KEY}
@@ -62,21 +51,5 @@ services:
     depends_on:
       - api
 
-  # 버킷 자동 생성 + 공개 읽기 정책 부여 (1회성 실행 후 종료)
-  createbuckets:
-    image: minio/mc
-    depends_on:
-      - minio
-    env_file:
-      - .env
-    entrypoint: >
-      /bin/sh -c "
-      until (mc alias set local http://minio:9000 $${STORAGE_ACCESS_KEY} $${STORAGE_SECRET_KEY}) do echo 'waiting for minio...'; sleep 2; done;
-      mc mb --ignore-existing local/$${STORAGE_BUCKET};
-      mc anonymous set download local/$${STORAGE_BUCKET};
-      echo 'bucket ready';
-      "
-
 volumes:
-  postgres_data:
   minio_data:

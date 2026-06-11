@@ -1,12 +1,13 @@
 """SQLAlchemy 데이터베이스 연결.
 
-ERD 제공 전까지 실제 모델/테이블은 정의하지 않는다. 엔진/세션/Base와
-요청 스코프 세션 의존성(`get_db`)만 제공한다.
+모델/Base는 cocktail-mate-db 패키지(private 레포)가 canonical로 관리한다.
+여기서는 엔진/세션/세션 의존성(`get_db`)과 Base re-export만 제공한다.
 """
 from collections.abc import Generator
 
+from cocktail_mate_db.base import Base  # noqa: F401 — 기존 import 경로 호환용 re-export
 from sqlalchemy import create_engine
-from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
+from sqlalchemy.orm import Session, sessionmaker
 
 from app.core.config import get_settings
 
@@ -19,10 +20,6 @@ engine = create_engine(
 )
 
 SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
-
-
-class Base(DeclarativeBase):
-    """모든 ORM 모델의 공통 베이스 (ERD 확정 후 모델이 상속)."""
 
 
 def get_db() -> Generator[Session, None, None]:

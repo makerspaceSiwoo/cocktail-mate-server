@@ -48,14 +48,17 @@ Docker를 설치해주시기 바랍니다.
 1) 환경 세팅
 모두 동일한 환경에서 개발을 진행하기 위해 Dockerfile로 환경을 구성했습니다.
 
-아래는 간략하게 실행할 수 있도록 명령어들을 나열해 놨습니다. 
+`.env` 파일을 팀 채널에서 받아 레포 루트에 두면 끝입니다 — 자세한 절차는
+[docs/ONBOARDING.md](docs/ONBOARDING.md) 참고. (로컬 DB 없음 — OCI 원격 개발 DB에 직접 접속)
+DB 스키마/운영, ORM 모델, 인프라(Terraform)는 별도 private 레포
+[cocktail-mate-db](https://github.com/makerspaceSiwoo/cocktail-mate-db)가 담당합니다.
+
 기타 자세한 사항은 Makefile을 참고하시면 됩니다.
-어
 
 2) 환경 세팅 명령어 흐름
-make up: Docker 컨테이너들 실행
+make up: Docker 컨테이너 실행
 make shell: 서버 컨테이너 접속
-make db-shell: PostgreSQL(pgvector) 컨테이너 접속
+DB 직접 조회: DBeaver로 OCI 개발 DB 접속 (docs/ONBOARDING.md 참고)
 
 3) 테스트
 make check: 컴파일이 되는지 체크

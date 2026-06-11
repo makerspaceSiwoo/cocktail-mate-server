@@ -2,10 +2,16 @@
 # 이미지 저장은 Oracle Object Storage(S3 호환)를 사용하므로 MinIO는 포함하지 않는다.
 # 스토리지 접속값(STORAGE_*)은 .env에 Oracle Object Storage 값으로 채운다 (DEPLOY.md 참고).
 #
+# DB는 이 스택에 없다 — cocktail-mate-db 레포의 docker-compose.db.yml이 같은 인스턴스에서
+# 별도 구동한다. api는 host.docker.internal(호스트 게이트웨이)로 접속한다
+# (OCI는 1:1 NAT라 자기 공인 IP로의 hairpin 접속이 안 됨 → .env의 DATABASE_URL 호스트를
+#  host.docker.internal:5432 로 설정).
+#
 # 외부 트래픽은 Caddy(80/443)가 받아 HTTPS 종료 후 api(8000)로 프록시한다.
 # Caddy가 Caddyfile의 도메인으로 Let's Encrypt 인증서를 자동 발급/갱신한다.
 #
 # 실행: docker compose -f docker-compose.prod.yml up -d --build
+#       (cocktail-mate-db 설치용 Deploy Key가 ssh-agent에 등록돼 있어야 함)
 services:
 
   caddy:
@@ -23,31 +29,18 @@ services:
       - api
 
   api:
-    build: .
+    build:
+      context: .
+      ssh: ["default"]   # cocktail-mate-db(private) 설치용 — ssh-agent의 Deploy Key 사용
     container_name: fastapi-server
     restart: always
     expose:
       - "8000"           # 내부 네트워크에서만 노출 (외부는 Caddy 경유)
     env_file:
       - .env
-    depends_on:
-      - db
-
-  db:
-    image: pgvector/pgvector:pg16
-    container_name: postgres-db
-    restart: always
-    env_file:
-      - .env
-    environment:
-      POSTGRES_DB: ${POSTGRES_DB}
-      POSTGRES_USER: ${POSTGRES_USER}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
-      - ./db/init:/docker-entrypoint-initdb.d
+    extra_hosts:
+      - "host.docker.internal:host-gateway"   # 같은 인스턴스의 DB(5432)로 접속
 
 volumes:
-  postgres_data:
   caddy_data:
   caddy_config:

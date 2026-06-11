@@ -54,7 +54,7 @@ api.<도메인> {            # ← 152-69-225-226.nip.io 를 교체
 프록시를 우회해 origin IP로 직접 때리는 공격을 막는 핵심 단계.
 - Cloudflare 공식 IP 대역: https://www.cloudflare.com/ips-v4 , /ips-v6
 - OCI 콘솔 → VCN → Security List에서 80/443 ingress의 `0.0.0.0/0`을 위 대역들로 교체
-  (terraform 관리 시 `network.tf`의 ingress 규칙을 대역 목록 변수로 전환).
+  (terraform은 cocktail-mate-db 레포로 이동 — 그쪽 `network.tf`의 `web_ingress_cidrs` 변수를 CF 대역으로 교체).
 - 주의: Let's Encrypt HTTP-01 챌린지도 CF 프록시를 통과하므로 문제 없음.
 
 ### 6. 프론트/CORS 갱신

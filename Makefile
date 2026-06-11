@@ -1,6 +1,6 @@
-.PHONY: up up-d down logs rebuild shell check test db-shell prod-up prod-down hooks
+.PHONY: up up-d down logs rebuild shell check test prod-up prod-down hooks
 
-# Docker 컨테이너들 실행 (로컬: api + postgres + minio)
+# Docker 컨테이너 실행 (로컬: api — DB는 .env의 OCI 원격 DB 사용)
 up:
 	docker compose up --build
 
@@ -23,10 +23,6 @@ logs:
 # api 컨테이너 접속
 shell:
 	docker compose exec api bash
-
-# PostgreSQL 접속
-db-shell:
-	docker compose exec db psql -U app_user -d cocktail_mate
 
 # 컴파일 체크
 check:
