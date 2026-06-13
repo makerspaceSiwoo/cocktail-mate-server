@@ -64,6 +64,34 @@ def create_app() -> FastAPI:
 
         return status
 
+    # ── 임시 진단용 (db-check): OCI db 데이터 조회 확인. 검증 끝나면 제거할 것. ──
+    @app.get("/db-check", tags=["infra"])
+    def db_check():
+        """배포된 api ↔ OCI db 연결 + 데이터 조회 확인용.
+
+        users 테이블을 **안전 필드만**(password_hash 제외) 반환한다.
+        ⚠️ 임시 엔드포인트 — 실사용자 데이터가 들어오기 전에 삭제.
+        """
+        from cocktail_mate_db.models import User
+
+        from app.core.database import SessionLocal
+
+        with SessionLocal() as db:
+            users = db.query(User).order_by(User.id).all()
+            return {
+                "count": len(users),
+                "users": [
+                    {
+                        "id": u.id,
+                        "email": u.email,
+                        "nickname": u.nickname,
+                        "is_active": u.is_active,
+                        "created_at": u.created_at.isoformat() if u.created_at else None,
+                    }
+                    for u in users
+                ],
+            }
+
     return app
 
 
