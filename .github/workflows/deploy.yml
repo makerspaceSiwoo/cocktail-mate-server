@@ -29,11 +29,21 @@ jobs:
           script: |
             set -e
             cd ~/cocktail-mate-server
+            PREV=$(git rev-parse HEAD)              # 직전(현재 가동) 커밋 — 롤백 기준
             git fetch origin
             git checkout main
-            git reset --hard origin/main          # 서버 코드를 main에 정확히 맞춤 (.env는 gitignore라 보존)
+            git reset --hard origin/main           # 서버 코드를 main에 맞춤 (.env는 gitignore라 보존)
             eval "$(ssh-agent -s)"
             ssh-add ~/.ssh/cm_db_deploy            # private 패키지 빌드용 Deploy Key
-            sudo --preserve-env=SSH_AUTH_SOCK docker compose -f docker-compose.prod.yml up -d --build
+            deploy() { sudo --preserve-env=SSH_AUTH_SOCK docker compose -f docker-compose.prod.yml up -d --build; }
+            deploy
             sleep 8
-            curl -fsS http://localhost:8000/health  # 실패하면 워크플로도 실패 처리
+            if curl -fsS http://localhost:8000/health; then
+              echo "✅ 배포 성공"
+            else
+              echo "❌ 헬스체크 실패 → 직전 커밋($PREV)으로 롤백"
+              git reset --hard "$PREV"
+              deploy
+              echo "↩️ 롤백 완료(직전 버전 복구). 워크플로는 실패로 종료."
+              exit 1
+            fi
