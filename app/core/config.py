@@ -18,7 +18,7 @@ class Settings(BaseSettings):
     app_env: str = "local"
 
     # ---- Database ----
-    database_url: str = "postgresql+psycopg2://app_user:change_me@db:5432/cocktail_mate"
+    # DB 접속(DATABASE_URL)은 app/core/db_settings.py(서버 연결 전용, 수정 금지)에서 관리.
 
     # ---- Object Storage (S3 compatible: 로컬 MinIO / 프로덕션 Oracle Object Storage) ----
     storage_endpoint: str = "http://minio:9000"
