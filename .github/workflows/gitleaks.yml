@@ -1,0 +1,18 @@
+# 시크릿 유출 상시 감지 — push/PR마다 전체 히스토리를 gitleaks로 스캔.
+# 공개 레포이므로 .env/키/토큰이 실수로 올라가면 즉시 CI가 실패해 알려준다.
+name: gitleaks
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # 전체 히스토리 스캔
+      - uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

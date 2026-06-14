@@ -1,38 +1,55 @@
+# 로컬 개발용 스택: FastAPI 단독.
+# DB는 OCI 원격 개발 DB에 직접 접속한다 — .env의 DATABASE_URL(공인 IP)만 있으면 끝.
+# (DB 운영/스키마는 cocktail-mate-db private 레포 담당)
+# 프로덕션(Oracle) 배포는 docker-compose.prod.yml 사용.
 services:
 
   api:
-    build: .
+    build:
+      context: .
+      ssh: ["default"]   # cocktail-mate-db(private) 설치용 — 호스트 ssh-agent의 GitHub 키 사용
     container_name: fastapi-server
-
     ports:
       - "8000:8000"
-
     volumes:
-      - .:/app
+      - .:/app            # 핫리로드(개발 편의)
+    env_file:
+      - .env
 
-    depends_on:
-      - db
-
-    environment:
-      DATABASE_URL: mysql+pymysql://app_user:app_password@db:3306/app_db
-
-  db:
-    image: mysql:8.4
-    container_name: mysql-db
-
+  # (opt-in) 오프라인 작업용 로컬 S3 호환 스토리지. 평소엔 .env의 STORAGE_*가
+  # Oracle Object Storage를 가리키므로 필요 없다.
+  #   docker compose --profile local-storage up -d
+  #   버킷 생성은 minio 콘솔(localhost:9001)에서 수동으로.
+  minio:
+    image: minio/minio
+    container_name: minio
     restart: always
-
+    profiles: ["local-storage"]
+    command: server /data --console-address ":9001"
     environment:
-      MYSQL_ROOT_PASSWORD: root
-      MYSQL_DATABASE: app_db
-      MYSQL_USER: app_user
-      MYSQL_PASSWORD: app_password
-
+      MINIO_ROOT_USER: ${STORAGE_ACCESS_KEY}
+      MINIO_ROOT_PASSWORD: ${STORAGE_SECRET_KEY}
     ports:
-      - "3307:3306"
-
+      - "9000:9000"   # S3 API
+      - "9001:9001"   # 웹 콘솔
     volumes:
-      - mysql_data:/var/lib/mysql
+      - minio_data:/data
+
+  # 로컬 개발 중 외부에서 API를 호출해볼 수 있게 하는 ngrok 터널 (opt-in).
+  #   1) .env 에 NGROK_AUTHTOKEN 설정 (https://dashboard.ngrok.com/get-started/your-authtoken)
+  #   2) docker compose --profile tunnel up -d
+  #   3) 공개 URL 확인: docker compose logs ngrok  → msg="started tunnel" ... url=https://xxxx.ngrok-free.app
+  #   profiles 로 묶여 있어 평소 `up` 에는 안 뜨고 `--profile tunnel` 일 때만 기동된다.
+  ngrok:
+    image: ngrok/ngrok:latest
+    container_name: ngrok
+    restart: unless-stopped
+    profiles: ["tunnel"]
+    command: ["http", "api:8000", "--log", "stdout"]
+    environment:
+      NGROK_AUTHTOKEN: ${NGROK_AUTHTOKEN:-}
+    depends_on:
+      - api
 
 volumes:
-  mysql_data:
+  minio_data:

@@ -1,0 +1,49 @@
+name: Deploy api-server to OCI
+
+# main에 push될 때마다 OCI 서버에 자동 배포. 수동 실행(workflow_dispatch)도 가능.
+# 배포 방식: 서버에 SSH로 접속해 git 최신화 + docker compose 재빌드.
+#   - 빌드(private 패키지 설치)는 서버에서 수행 → db 레포 키는 GitHub에 두지 않는다.
+#   - DB 비번/STORAGE 키 등은 서버의 .env(커밋 금지)에 그대로 → GitHub Secret 불필요.
+#   - GitHub Secret은 OCI 접속용 SSH 키(전용) 1개만.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch: {}
+
+# 동시에 두 배포가 겹치지 않게
+concurrency:
+  group: oci-deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: SSH 배포 (git pull + docker compose up --build)
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.OCI_HOST }}
+          username: ${{ secrets.OCI_USER }}
+          key: ${{ secrets.OCI_SSH_KEY }}
+          command_timeout: 20m        # private 패키지 설치 빌드가 길 수 있음
+          script: |
+            set -e
+            cd ~/cocktail-mate-server
+            PREV=$(git rev-parse HEAD)              # 직전(현재 가동) 커밋 — 롤백 기준
+            git fetch origin
+            git checkout main
+            git reset --hard origin/main           # 서버 코드를 main에 맞춤 (.env는 gitignore라 보존)
+            eval "$(ssh-agent -s)"
+            ssh-add ~/.ssh/cm_db_deploy            # private 패키지 빌드용 Deploy Key
+            deploy() { sudo --preserve-env=SSH_AUTH_SOCK docker compose -f docker-compose.prod.yml up -d --build; }
+            deploy
+            sleep 8
+            if curl -fsS http://localhost:8000/health; then
+              echo "✅ 배포 성공"
+            else
+              echo "❌ 헬스체크 실패 → 직전 커밋($PREV)으로 롤백"
+              git reset --hard "$PREV"
+              deploy
+              echo "↩️ 롤백 완료(직전 버전 복구). 워크플로는 실패로 종료."
+              exit 1
+            fi
