@@ -86,14 +86,23 @@ jobs:
             API_TAG="${API_IMAGE}:${SHA}"; CADDY_TAG="${CADDY_IMAGE}:${SHA}"
             sudo API_IMAGE="$API_TAG" CADDY_IMAGE="$CADDY_TAG" docker compose -f docker-compose.prod.yml pull
             sudo API_IMAGE="$API_TAG" CADDY_IMAGE="$CADDY_TAG" docker compose -f docker-compose.prod.yml up -d
-            sleep 8
-            if curl -fsS http://localhost:8000/health; then
-              echo "✅ 배포 성공"
+            # api는 expose(내부)만 — 호스트 localhost:8000은 안 열림 → 컨테이너 내부에서 확인.
+            # 기동 시간 고려해 최대 ~30초 재시도.
+            ok=0
+            for i in 1 2 3 4 5 6; do
+              if sudo docker exec fastapi-server python -c "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8000/health').status==200 else 1)" 2>/dev/null; then
+                ok=1; break
+              fi
+              sleep 5
+            done
+            if [ "$ok" = 1 ]; then
+              echo "✅ 배포 성공 (api /health 200)"
             else
               echo "❌ 헬스 실패 → 직전 이미지로 롤백: ${PREV_API:-(없음)}"
               if [ -n "$PREV_API" ]; then
                 sudo API_IMAGE="$PREV_API" CADDY_IMAGE="$CADDY_TAG" docker compose -f docker-compose.prod.yml up -d
               fi
+              echo "--- api 로그 (원인 확인용) ---"; sudo docker logs fastapi-server --tail 30 2>&1 || true
               exit 1
             fi
         env:
