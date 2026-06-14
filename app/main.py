@@ -18,13 +18,10 @@ from app.user.router import router as user_router
 def create_app() -> FastAPI:
     settings = get_settings()
 
-    # production 에서는 /docs, /redoc, /openapi.json 비공개 (API 구조 정보 노출 차단)
-    docs_kwargs: dict = (
-        {"docs_url": None, "redoc_url": None, "openapi_url": None}
-        if settings.is_production
-        else {}
-    )
-    app = FastAPI(title="cocktail-mate-server", **docs_kwargs)
+    # 토이 프로젝트 — 개발 편의 우선이라 production에서도 /docs·/redoc·/openapi.json 공개.
+    # (민감 데이터 없음. 추후 필요하면 Basic Auth 등으로 보호 가능.)
+    # @TODO 개발 완료 후 production에서 docs 접근 auth 추가
+    app = FastAPI(title="cocktail-mate-server")
     cors_kwargs: dict = {
         "allow_origins": settings.cors_origin_list,
         "allow_credentials": True,
