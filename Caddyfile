@@ -1,6 +1,8 @@
-# Caddy 리버스 프록시 — nip.io 도메인으로 Let's Encrypt 인증서 자동 발급/갱신.
-# 도메인을 바꾸려면 아래 호스트명만 교체하면 된다 (예: api.example.com).
-# nip.io: <대시구분 IP>.nip.io 가 해당 IP로 자동 resolve → 도메인 구매 불필요.
+# Caddy 리버스 프록시 — 도메인별 Let's Encrypt 인증서 자동 발급/갱신.
+# 두 도메인을 모두 서빙한다(둘 다 152.69.225.226로 resolve):
+#   - 152-69-225-226.nip.io     : IP 기반(가입 불필요)
+#   - cocktail-mate.duckdns.org : 외우기 쉬운 이름(DuckDNS, 무료) — docs 접근 등에 사용
+# 도메인을 추가/교체하려면 아래 사이트 주소 줄만 수정하면 된다.
 #
 # rate_limit: IP당 분당 100요청 초과 시 429 반환 (L7 플러딩/무차별 호출 1차 방어).
 #   caddy:2 기본 이미지엔 없는 모듈이라 caddy/Dockerfile 커스텀 빌드를 사용한다.
@@ -11,7 +13,7 @@
 	order rate_limit before basic_auth
 }
 
-152-69-225-226.nip.io {
+152-69-225-226.nip.io, cocktail-mate.duckdns.org {
 	rate_limit {
 		zone per_ip {
 			key {remote_host}
