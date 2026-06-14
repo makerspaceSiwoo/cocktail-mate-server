@@ -1,49 +1,98 @@
 name: Deploy api-server to OCI
 
-# main에 push될 때마다 OCI 서버에 자동 배포. 수동 실행(workflow_dispatch)도 가능.
-# 배포 방식: 서버에 SSH로 접속해 git 최신화 + docker compose 재빌드.
-#   - 빌드(private 패키지 설치)는 서버에서 수행 → db 레포 키는 GitHub에 두지 않는다.
-#   - DB 비번/STORAGE 키 등은 서버의 .env(커밋 금지)에 그대로 → GitHub Secret 불필요.
-#   - GitHub Secret은 OCI 접속용 SSH 키(전용) 1개만.
+# main push마다: ① GitHub Actions에서 api/caddy 이미지를 빌드해 GHCR에 push
+#               ② OCI 서버는 pull + up 만 (서버에서 빌드 X → 인스턴스 과부하/네트워크 문제 회피)
 on:
   push:
     branches: [main]
   workflow_dispatch: {}
 
-# 동시에 두 배포가 겹치지 않게
 concurrency:
   group: oci-deploy
   cancel-in-progress: false
 
+env:
+  API_IMAGE: ghcr.io/makerspacesiwoo/cocktail-mate-server
+  CADDY_IMAGE: ghcr.io/makerspacesiwoo/cocktail-mate-caddy
+
 jobs:
-  deploy:
+  # ── ① 빌드 & GHCR push (러너에서 — 네트워크 튼튼) ──
+  build:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
     steps:
-      - name: SSH 배포 (git pull + docker compose up --build)
+      - uses: actions/checkout@v4
+
+      # private 패키지(cocktail-mate-db) 설치용 Deploy Key를 ssh-agent에 로드
+      - uses: webfactory/ssh-agent@v0.9.0
+        with:
+          ssh-private-key: ${{ secrets.CMDB_DEPLOY_KEY }}
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build & push api 이미지
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          ssh: default          # cocktail-mate-db(private) 설치
+          push: true
+          tags: |
+            ${{ env.API_IMAGE }}:latest
+            ${{ env.API_IMAGE }}:${{ github.sha }}
+
+      - name: Build & push caddy 이미지
+        uses: docker/build-push-action@v6
+        with:
+          context: ./caddy
+          push: true
+          tags: |
+            ${{ env.CADDY_IMAGE }}:latest
+            ${{ env.CADDY_IMAGE }}:${{ github.sha }}
+
+  # ── ② OCI 서버에 SSH → pull + up (헬스 실패 시 직전 이미지로 롤백) ──
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: read
+    steps:
+      - name: SSH 배포 (pull + up)
         uses: appleboy/ssh-action@v1.2.0
         with:
           host: ${{ secrets.OCI_HOST }}
           username: ${{ secrets.OCI_USER }}
           key: ${{ secrets.OCI_SSH_KEY }}
-          command_timeout: 20m        # private 패키지 설치 빌드가 길 수 있음
+          envs: GHCR_USER,GHCR_TOKEN,API_IMAGE,CADDY_IMAGE,SHA
+          command_timeout: 10m
           script: |
             set -e
             cd ~/cocktail-mate-server
-            PREV=$(git rev-parse HEAD)              # 직전(현재 가동) 커밋 — 롤백 기준
-            git fetch origin
-            git checkout main
-            git reset --hard origin/main           # 서버 코드를 main에 맞춤 (.env는 gitignore라 보존)
-            eval "$(ssh-agent -s)"
-            ssh-add ~/.ssh/cm_db_deploy            # private 패키지 빌드용 Deploy Key
-            deploy() { sudo --preserve-env=SSH_AUTH_SOCK docker compose -f docker-compose.prod.yml up -d --build; }
-            deploy
+            git fetch origin && git checkout main && git reset --hard origin/main   # compose/Caddyfile만 최신화 (.env 보존)
+            echo "$GHCR_TOKEN" | sudo docker login ghcr.io -u "$GHCR_USER" --password-stdin
+            PREV_API=$(sudo docker inspect --format '{{.Config.Image}}' fastapi-server 2>/dev/null || echo "")
+            API_TAG="${API_IMAGE}:${SHA}"; CADDY_TAG="${CADDY_IMAGE}:${SHA}"
+            sudo API_IMAGE="$API_TAG" CADDY_IMAGE="$CADDY_TAG" docker compose -f docker-compose.prod.yml pull
+            sudo API_IMAGE="$API_TAG" CADDY_IMAGE="$CADDY_TAG" docker compose -f docker-compose.prod.yml up -d
             sleep 8
             if curl -fsS http://localhost:8000/health; then
               echo "✅ 배포 성공"
             else
-              echo "❌ 헬스체크 실패 → 직전 커밋($PREV)으로 롤백"
-              git reset --hard "$PREV"
-              deploy
-              echo "↩️ 롤백 완료(직전 버전 복구). 워크플로는 실패로 종료."
+              echo "❌ 헬스 실패 → 직전 이미지로 롤백: ${PREV_API:-(없음)}"
+              if [ -n "$PREV_API" ]; then
+                sudo API_IMAGE="$PREV_API" CADDY_IMAGE="$CADDY_TAG" docker compose -f docker-compose.prod.yml up -d
+              fi
               exit 1
             fi
+        env:
+          GHCR_USER: ${{ github.actor }}
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          API_IMAGE: ${{ env.API_IMAGE }}
+          CADDY_IMAGE: ${{ env.CADDY_IMAGE }}
+          SHA: ${{ github.sha }}
