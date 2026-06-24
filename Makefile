@@ -1,11 +1,15 @@
-.PHONY: up up-d down logs rebuild shell check test prod-up prod-down hooks
+.PHONY: up up-d down logs rebuild shell check test prod-up prod-down hooks ssh-check
+
+# 빌드 전 GitHub SSH 인증 점검 (cocktail-mate-db private 레포 설치 전제)
+ssh-check:
+	@bash scripts/check-ssh.sh
 
 # Docker 컨테이너 실행 (로컬: api — DB는 .env의 OCI 원격 DB 사용)
-up:
+up: ssh-check
 	docker compose up --build
 
 # 백그라운드 실행
-up-d:
+up-d: ssh-check
 	docker compose up -d --build
 
 # 종료
