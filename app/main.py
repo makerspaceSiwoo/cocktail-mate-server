@@ -7,12 +7,16 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import text
 
+from app import cocktail
 from app.cocktail.router import router as cocktail_router
 from app.core.config import get_settings
 from app.core.database import engine
 from app.core.storage import check_bucket
 from app.like.router import router as like_router
 from app.user.router import router as user_router
+
+from cocktail_mate_db.models.cocktail import Cocktail
+from app.core.database import SessionLocal
 
 
 def create_app() -> FastAPI:
@@ -88,8 +92,32 @@ def create_app() -> FastAPI:
                     for u in users
                 ],
             }
+    
+
+    # ── 임시 진단용 (db-test): cocktails 테이블 상위 10개 조회 확인 ──
+    @app.get("/db-test", tags=["infra"])
+    def db_test():
+        """배포된 api ↔ DB 연결 + cocktails 데이터 조회 확인용.
+
+        cocktails 테이블에서 id 기준 상위 10개의 id/name만 반환한다.
+        """
+        from cocktail_mate_db.models.cocktail import Cocktail
+
+        from app.core.database import SessionLocal
+
+        with SessionLocal() as db:
+            cocktails = db.query(Cocktail).order_by(Cocktail.id).limit(10).all()
+            return {
+                "count": len(cocktails),
+                "cocktails": [
+                    {
+                        "id": c.id,
+                        "name": c.name,
+                    }
+                    for c in cocktails
+                ],
+            }
 
     return app
-
 
 app = create_app()
