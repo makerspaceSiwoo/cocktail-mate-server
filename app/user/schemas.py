@@ -27,3 +27,10 @@ class MyInfoResponse(BaseModel):
     nickname: str
     email: str
     profileImageUrl: str
+
+
+class SignupRequest(BaseModel):
+    email: str
+    password: str
+    nickname: str
+    profileImageUrl: str | None = None
