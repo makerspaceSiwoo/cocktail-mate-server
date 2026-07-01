@@ -45,3 +45,9 @@ class DrinkOfTheDay(BaseModel):
     imageUrl: str
     description: str
     ABV: float
+
+
+class CocktailDetailResponse(BaseModel):
+    name: str
+    recipe: str | None = None
+    description: str | None = None
