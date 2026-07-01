@@ -2,6 +2,9 @@
 
 응답 본문은 기존 mock 구현과 동일하게 유지한다. DB 연동은 ERD 확정 후.
 """
+
+from sqlalchemy.orm import Session
+
 from app.cocktail.repository import CocktailRepository
 
 
@@ -9,8 +12,8 @@ class CocktailService:
     def __init__(self, repository: CocktailRepository | None = None) -> None:
         self.repository = repository or CocktailRepository()
 
-    def list_cocktails(self) -> list[dict]:
-        return self.repository.list_all()
+    def list_cocktails(self, db: Session) -> list[dict]:
+        return self.repository.list_all(db)
 
     def get_brief(self, cocktail_id: int) -> dict:
         return {
