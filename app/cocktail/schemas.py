@@ -45,3 +45,29 @@ class DrinkOfTheDay(BaseModel):
     imageUrl: str
     description: str
     ABV: float
+
+
+class CocktailListItem(BaseModel):
+    id: int
+    name: str
+    nameEn: str | None = None
+    imageUrl: str | None = None
+    baseTag: str | None = None
+    description: str | None = None
+    abv: float | None = None
+    glass: str | None = None
+
+
+class CocktailListMeta(BaseModel):
+    page: int
+    rpp: int
+    hasNextPage: bool
+
+
+class CocktailListResponse(BaseModel):
+    items: list[CocktailListItem]
+    meta: CocktailListMeta
+
+
+class BaseTagListResponse(BaseModel):
+    items: list[str]

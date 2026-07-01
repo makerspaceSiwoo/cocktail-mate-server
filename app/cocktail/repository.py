@@ -3,12 +3,31 @@
 현재는 mock 데이터를 반환한다. ERD 확정 후 SQLAlchemy 세션 기반 쿼리로 교체한다
 (생성자에서 `Session`을 주입받는 형태로 확장 예정).
 """
+
+from sqlalchemy.orm import Session
+
+from cocktail_mate_db.models.cocktail import Cocktail
+
 from app.cocktail.mock import MOCK_COCKTAILS
 
 
 class CocktailRepository:
-    def list_all(self) -> list[dict]:
-        return MOCK_COCKTAILS
+    def list_all(self, db: Session) -> list[dict]:
+        cocktails = db.query(Cocktail).order_by(Cocktail.id).all()
+
+        return [
+            {
+                "id": cocktail.id,
+                "name": cocktail.name,
+                "nameEn": cocktail.name_en,
+                "imageUrl": cocktail.image_url,
+                "baseTag": cocktail.base_tag,
+                "description": cocktail.description,
+                "abv": cocktail.abv,
+                "glass": cocktail.glass,
+            }
+            for cocktail in cocktails
+        ]
 
     def search(self, keyword: str) -> list[dict]:
         kw = keyword.lower()
