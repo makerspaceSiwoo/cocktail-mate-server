@@ -6,9 +6,8 @@
 
 from sqlalchemy.orm import Session
 
-from cocktail_mate_db.models.cocktail import Cocktail
-
 from app.cocktail.mock import MOCK_COCKTAILS
+from cocktail_mate_db.models import Cocktail, CocktailIngredient, Ingredient
 
 
 class CocktailRepository:
@@ -78,3 +77,48 @@ class CocktailRepository:
             or kw in c["baseTag"].lower()
             or kw in c["description"].lower()
         ]
+    
+    def find_detail_by_id(self, db: Session, cocktail_id: int) -> dict | None:
+        cocktail = (
+            db.query(Cocktail)
+            .filter(Cocktail.id == cocktail_id)
+            .first()
+        )
+
+        if cocktail is None:
+            return None
+
+        rows = (
+            db.query(CocktailIngredient, Ingredient)
+            .join(Ingredient, CocktailIngredient.ingredient_id == Ingredient.id)
+            .filter(CocktailIngredient.cocktail_id == cocktail_id)
+            .order_by(CocktailIngredient.id)
+            .all()
+        )
+
+        return {
+            "id": cocktail.id,
+            "name": cocktail.name,
+            "nameEn": cocktail.name_en,
+            "imageUrl": cocktail.image_url,
+            "glass": cocktail.glass,
+            "abv": cocktail.abv,
+            "recipe": cocktail.recipe,
+            "description": cocktail.description,
+            "baseTag": cocktail.base_tag,
+            "ingredients": [
+                {
+                    "id": ingredient.id,
+                    "name": ingredient.name,
+                    "nameEn": ingredient.name_en,
+                    "category": ingredient.category,
+                    "amount": cocktail_ingredient.amount,
+                    "unit": cocktail_ingredient.unit,
+                    "description": ingredient.description,
+                    "abv": ingredient.abv,
+                    "imageUrl": ingredient.image_url,
+                    "potency": ingredient.potency,
+                }
+                for cocktail_ingredient, ingredient in rows
+            ],
+        }

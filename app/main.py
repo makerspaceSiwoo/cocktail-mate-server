@@ -15,7 +15,7 @@ from app.core.storage import check_bucket
 from app.like.router import router as like_router
 from app.user.router import router as user_router
 
-from cocktail_mate_db.models.cocktail import Cocktail
+from cocktail_mate_db.models import Cocktail
 from app.core.database import SessionLocal
 
 
@@ -101,7 +101,7 @@ def create_app() -> FastAPI:
 
         cocktails 테이블에서 id 기준 상위 10개의 id/name만 반환한다.
         """
-        from cocktail_mate_db.models.cocktail import Cocktail
+        from cocktail_mate_db.models import Cocktail
 
         from app.core.database import SessionLocal
 
