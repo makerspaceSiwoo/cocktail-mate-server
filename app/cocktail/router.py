@@ -2,7 +2,9 @@
 
 경로/응답은 기존 단일 파일 구현과 동일하게 유지한다 (prefix 없음).
 """
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
+
+from sqlalchemy.orm import Session
 
 from app.cocktail.schemas import (
     CocktailBrief,
@@ -12,6 +14,8 @@ from app.cocktail.schemas import (
     SearchResult,
 )
 from app.cocktail.service import CocktailService
+from app.core.database import get_db
+from app.cocktail.schemas import CocktailDetailResponse
 
 router = APIRouter(tags=["cocktail"])
 service = CocktailService()
@@ -45,3 +49,8 @@ def explore_cocktail(id: int):
 @router.get("/drink-of-the-day", response_model=DrinkOfTheDay)
 def drink_of_the_day():
     return service.drink_of_the_day()
+
+
+@router.get("/cocktail/{id}", response_model=CocktailDetailResponse)
+def get_cocktail(id: int, db: Session = Depends(get_db)):
+    return service.get_detail(db, id)
