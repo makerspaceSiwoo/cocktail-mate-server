@@ -4,6 +4,9 @@
 """
 from app.cocktail.repository import CocktailRepository
 
+from fastapi import HTTPException
+from sqlalchemy.orm import Session
+
 
 class CocktailService:
     def __init__(self, repository: CocktailRepository | None = None) -> None:
@@ -48,3 +51,10 @@ class CocktailService:
             "description": "salty, sugary",
             "ABV": 21.3,
         }
+    def get_detail(self, db: Session, cocktail_id: int) -> dict:
+        cocktail = self.repository.find_detail_by_id(db, cocktail_id)
+
+        if cocktail is None:
+            raise HTTPException(status_code=404, detail="Cocktail not found")
+
+        return cocktail
