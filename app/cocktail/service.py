@@ -12,8 +12,17 @@ class CocktailService:
     def __init__(self, repository: CocktailRepository | None = None) -> None:
         self.repository = repository or CocktailRepository()
 
-    def list_cocktails(self, db: Session) -> list[dict]:
-        return self.repository.list_all(db)
+    def list_cocktails(
+        self,
+        db: Session,
+        page: int,
+        rpp: int,
+        base: str | None,
+    ) -> dict:
+        return self.repository.list_all(db, page, rpp, base)
+    
+    def get_base_tags(self, db: Session) -> dict:
+        return self.repository.get_base_tags(db)
 
     def get_brief(self, cocktail_id: int) -> dict:
         return {
