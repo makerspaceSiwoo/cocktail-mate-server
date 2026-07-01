@@ -6,13 +6,13 @@
 
 from sqlalchemy.orm import Session
 
-from cocktail_mate_db.models.cocktail import Cocktail
-
 from app.cocktail.mock import MOCK_COCKTAILS
 
 from sqlalchemy.orm import Session
 
 from cocktail_mate_db.models.cocktail import Cocktail
+from cocktail_mate_db.models.ingredient import Ingredient
+from cocktail_mate_db.models.cocktail_ingredient import CocktailIngredient
 
 
 class CocktailRepository:
@@ -93,8 +93,37 @@ class CocktailRepository:
         if cocktail is None:
             return None
 
+        rows = (
+            db.query(CocktailIngredient, Ingredient)
+            .join(Ingredient, CocktailIngredient.ingredient_id == Ingredient.id)
+            .filter(CocktailIngredient.cocktail_id == cocktail_id)
+            .order_by(CocktailIngredient.id)
+            .all()
+        )
+
         return {
+            "id": cocktail.id,
             "name": cocktail.name,
+            "nameEn": cocktail.name_en,
+            "imageUrl": cocktail.image_url,
+            "glass": cocktail.glass,
+            "abv": cocktail.abv,
             "recipe": cocktail.recipe,
             "description": cocktail.description,
+            "baseTag": cocktail.base_tag,
+            "ingredients": [
+                {
+                    "id": ingredient.id,
+                    "name": ingredient.name,
+                    "nameEn": ingredient.name_en,
+                    "category": ingredient.category,
+                    "amount": cocktail_ingredient.amount,
+                    "unit": cocktail_ingredient.unit,
+                    "description": ingredient.description,
+                    "abv": ingredient.abv,
+                    "imageUrl": ingredient.image_url,
+                    "potency": ingredient.potency,
+                }
+                for cocktail_ingredient, ingredient in rows
+            ],
         }
