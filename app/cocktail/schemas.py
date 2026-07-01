@@ -57,7 +57,7 @@ class CocktailIngredientDetail(BaseModel):
     description: str | None = None
     abv: float | None = None
     imageUrl: str | None = None
-    potency: str | None = None
+    potency: float | None = None
 
 
 class CocktailDetailResponse(BaseModel):
@@ -67,7 +67,7 @@ class CocktailDetailResponse(BaseModel):
     imageUrl: str | None = None
     glass: str | None = None
     abv: float | None = None
-    recipe: str | None = None
+    recipe: list[str] | None = None
     description: str | None = None
     baseTag: str | None = None
     ingredients: list[CocktailIngredientDetail]

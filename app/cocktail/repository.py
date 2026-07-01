@@ -7,12 +7,7 @@
 from sqlalchemy.orm import Session
 
 from app.cocktail.mock import MOCK_COCKTAILS
-
-from sqlalchemy.orm import Session
-
-from cocktail_mate_db.models.cocktail import Cocktail
-from cocktail_mate_db.models.ingredient import Ingredient
-from cocktail_mate_db.models.cocktail_ingredient import CocktailIngredient
+from cocktail_mate_db.models import Cocktail, CocktailIngredient, Ingredient
 
 
 class CocktailRepository:
