@@ -30,11 +30,6 @@ def root():
     return {"message": "Hello World"}
 
 
-@router.get("/cocktail/{id}", response_model=CocktailBrief)
-def get_cocktail(id: int):
-    return service.get_brief(id)
-
-
 @router.get("/search", response_model=SearchResult)
 def search_cocktails(keyword: str = "", page: int = 1, rpp: int = 10):
     return service.search(keyword, page, rpp)
@@ -66,5 +61,5 @@ def drink_of_the_day():
 
 
 @router.get("/cocktail/{id}", response_model=CocktailDetailResponse)
-def get_cocktail(id: int, db: Session = Depends(get_db)):
+def get_cocktail_detail(id: int, db: Session = Depends(get_db)):
     return service.get_detail(db, id)
