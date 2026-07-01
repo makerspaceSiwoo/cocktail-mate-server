@@ -12,22 +12,62 @@ from app.cocktail.mock import MOCK_COCKTAILS
 
 
 class CocktailRepository:
-    def list_all(self, db: Session) -> list[dict]:
-        cocktails = db.query(Cocktail).order_by(Cocktail.id).all()
+    def list_all(
+        self,
+        db: Session,
+        page: int,
+        rpp: int,
+        base: str | None,
+    ) -> dict:
+        query = db.query(Cocktail)
 
-        return [
-            {
-                "id": cocktail.id,
-                "name": cocktail.name,
-                "nameEn": cocktail.name_en,
-                "imageUrl": cocktail.image_url,
-                "baseTag": cocktail.base_tag,
-                "description": cocktail.description,
-                "abv": cocktail.abv,
-                "glass": cocktail.glass,
-            }
-            for cocktail in cocktails
-        ]
+        if base:
+            query = query.filter(Cocktail.base_tag == base)
+
+        cocktails = (
+            query
+            .order_by(Cocktail.id)
+            .offset((page - 1) * rpp)
+            .limit(rpp + 1)
+            .all()
+        )
+
+        has_next_page = len(cocktails) > rpp
+        cocktails = cocktails[:rpp]
+
+        return {
+            "items": [
+                {
+                    "id": cocktail.id,
+                    "name": cocktail.name,
+                    "nameEn": cocktail.name_en,
+                    "imageUrl": cocktail.image_url,
+                    "baseTag": cocktail.base_tag,
+                    "description": cocktail.description,
+                    "abv": cocktail.abv,
+                    "glass": cocktail.glass,
+                }
+                for cocktail in cocktails
+            ],
+            "meta": {
+                "page": page,
+                "rpp": rpp,
+                "hasNextPage": has_next_page,
+            },
+        }
+    
+    def get_base_tags(self, db: Session) -> dict:
+        rows = (
+            db.query(Cocktail.base_tag)
+            .filter(Cocktail.base_tag.isnot(None))
+            .distinct()
+            .order_by(Cocktail.base_tag)
+            .all()
+        )
+
+        return {
+            "items": [row[0] for row in rows]
+        }
 
     def search(self, keyword: str) -> list[dict]:
         kw = keyword.lower()
