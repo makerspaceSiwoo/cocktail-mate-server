@@ -5,6 +5,10 @@
 """
 from app.cocktail.mock import MOCK_COCKTAILS
 
+from sqlalchemy.orm import Session
+
+from cocktail_mate_db.models.cocktail import Cocktail
+
 
 class CocktailRepository:
     def list_all(self) -> list[dict]:
@@ -19,3 +23,19 @@ class CocktailRepository:
             or kw in c["baseTag"].lower()
             or kw in c["description"].lower()
         ]
+    
+    def find_detail_by_id(self, db: Session, cocktail_id: int) -> dict | None:
+        cocktail = (
+            db.query(Cocktail)
+            .filter(Cocktail.id == cocktail_id)
+            .first()
+        )
+
+        if cocktail is None:
+            return None
+
+        return {
+            "name": cocktail.name,
+            "recipe": cocktail.recipe,
+            "description": cocktail.description,
+        }
