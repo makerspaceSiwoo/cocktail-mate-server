@@ -3,6 +3,8 @@
 도메인 라우터(cocktail/user/like)를 등록하고, 배포 검증용 /health를 제공한다.
 기존 엔드포인트 경로/응답은 도메인 패키지로 이동했을 뿐 그대로 유지된다.
 """
+import logging
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from slowapi.errors import RateLimitExceeded
@@ -25,8 +27,26 @@ from cocktail_mate_db.models.cocktail import Cocktail
 from app.core.database import SessionLocal
 
 
+def _configure_logging(level_name: str) -> None:
+    """`app.*` 로거를 stderr로 출력하도록 설정한다.
+
+    uvicorn 기본 로깅은 앱 로거(app.auth.mail 등)에 핸들러를 붙이지 않아 INFO 로그가
+    묻힌다. 콘솔 메일 백엔드가 매직 링크를 로그로 내보내므로, `app` 로거에 핸들러+레벨을
+    직접 지정한다. uvicorn dictConfig(disable_existing_loggers=False) 이후에 호출돼도 유지된다.
+    """
+    level = getattr(logging, level_name.upper(), logging.INFO)
+    app_logger = logging.getLogger("app")
+    app_logger.setLevel(level)
+    if not app_logger.handlers:
+        handler = logging.StreamHandler()
+        handler.setFormatter(logging.Formatter("%(levelname)s [%(name)s] %(message)s"))
+        app_logger.addHandler(handler)
+    app_logger.propagate = False
+
+
 def create_app() -> FastAPI:
     settings = get_settings()
+    _configure_logging(settings.log_level)
 
     # 토이 프로젝트 — 개발 편의 우선이라 production에서도 /docs·/redoc·/openapi.json 공개.
     # (민감 데이터 없음. 추후 필요하면 Basic Auth 등으로 보호 가능.)

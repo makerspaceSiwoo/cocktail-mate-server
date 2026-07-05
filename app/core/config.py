@@ -16,6 +16,8 @@ class Settings(BaseSettings):
 
     # ---- App ----
     app_env: str = "local"
+    # 애플리케이션 로그 레벨. 콘솔 메일 백엔드(매직 링크 로그 출력)는 INFO 이상이어야 보인다.
+    log_level: str = "info"
 
     # ---- Database ----
     # DB 접속(DATABASE_URL)은 app/core/db_settings.py(서버 연결 전용, 수정 금지)에서 관리.
