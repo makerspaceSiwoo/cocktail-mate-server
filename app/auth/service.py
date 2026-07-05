@@ -18,14 +18,22 @@ from sqlalchemy.orm import Session
 
 from cocktail_mate_db.models import EmailVerification, RefreshToken, User
 
-from app.auth.mail import send_verification_email
+from app.auth.mail import send_password_reset_email, send_verification_email
 from app.auth.providers import SocialProfile
 from app.auth.repository import AuthRepository
-from app.auth.schemas import SignupRequest
+from app.auth.schemas import (
+    PasswordChangeRequest,
+    PasswordResetRequest,
+    SignupRequest,
+)
 from app.core.config import get_settings
 from app.core.security import (
+    JWTError,
     create_access_token,
+    create_password_reset_token,
     create_refresh_token,
+    decode_password_reset_token,
+    extract_reset_token_subject,
     generate_random_token,
     hash_password,
     hash_token,
@@ -168,14 +176,19 @@ class AuthService:
                 detail="인증 요청이 만료되었습니다.",
             )
 
-        # 닉네임: email local-part 기반 자동 생성.
-        local_part = payload.email.split("@", 1)[0]
-        nickname = self._unique_nickname(db, local_part)
+        # 닉네임: 사용자 입력값 사용. UNIQUE 제약 위반이 (provider,email) 인지 nickname 인지
+        # IntegrityError 로는 구분이 어려우므로 생성 전에 중복 조회로 미리 걸러 409 를 명확히 한다.
+        # (중복이면 rollback 전이라 consumed_at 이 찍히지 않아 닉네임만 바꿔 재시도 가능.)
+        if self.repository.nickname_exists(db, payload.nickname):
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="이미 사용 중인 닉네임입니다.",
+            )
 
         user = User(
             email=payload.email,
             password_hash=hash_password(payload.password),
-            nickname=nickname,
+            nickname=payload.nickname,
             provider=LOCAL_PROVIDER,
             provider_id=None,
             is_active=True,
@@ -187,6 +200,7 @@ class AuthService:
         except IntegrityError:
             db.rollback()
             # (provider,email) UNIQUE 위반 = 이미 가입된 계정.
+            # (닉네임 경합은 위에서 선조회로 대부분 걸러지지만, 동시성으로 여기 올 수도 있음.)
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
                 detail="이미 가입된 이메일입니다.",
@@ -298,6 +312,81 @@ class AuthService:
         if stored is not None:
             self.repository.delete_refresh_tokens_for_user(db, stored.user_id)
             db.commit()
+
+    # ── 비밀번호 찾기(재설정 링크 발송) ─────────────────────
+    def password_forgot(self, db: Session, email: str) -> None:
+        """(local,email) 유저가 있으면 재설정 링크 메일 발송. 없어도 항상 성공.
+
+        가입 여부 비노출 정책 — 유저 존재 여부와 무관하게 동일하게 반환한다.
+        토큰은 DB 저장 없이 secret_key+password_hash 로 서명(비번 바뀌면 자동 무효).
+        """
+        settings = get_settings()
+        user = self.repository.get_user_by_provider_email(db, LOCAL_PROVIDER, email)
+        # 소셜 유저(password_hash NULL)는 재설정 대상 아님 → 조용히 무시.
+        if user is None or user.password_hash is None:
+            logger.info("password-forgot: 대상 없음/소셜 email=%s", email)
+            return
+
+        token = create_password_reset_token(user.id, user.password_hash)
+        reset_url = f"{settings.frontend_url}/reset-password?token={token}"
+        send_password_reset_email(email, reset_url)
+
+    # ── 비밀번호 재설정(토큰 검증 → 갱신) ────────────────────
+    def password_reset(self, db: Session, payload: PasswordResetRequest) -> None:
+        """재설정 토큰 검증 후 password_hash 갱신 + 기존 refresh 전부 삭제(강제 재로그인)."""
+        # 1) 서명 검증 전에 sub(user_id)만 추출 → 어떤 유저인지 파악.
+        try:
+            user_id = extract_reset_token_subject(payload.token)
+        except (JWTError, ValueError, TypeError):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="유효하지 않은 링크입니다.",
+            ) from None
+
+        user = self.repository.get_user_by_id(db, user_id)
+        if user is None or user.password_hash is None:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="유효하지 않은 링크입니다.",
+            )
+
+        # 2) 그 유저의 현재 password_hash 로 정식 검증(서명/만료/type).
+        try:
+            decode_password_reset_token(payload.token, user.password_hash)
+        except (JWTError, ValueError, TypeError):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="만료되었거나 잘못된 링크입니다.",
+            ) from None
+
+        # 3) 비번 갱신 + 강제 재로그인(refresh 전부 삭제).
+        user.password_hash = hash_password(payload.new_password)
+        self.repository.delete_refresh_tokens_for_user(db, user.id)
+        db.commit()
+
+    # ── 비밀번호 변경(로그인 상태) ───────────────────────────
+    def password_change(
+        self, db: Session, user: User, payload: PasswordChangeRequest
+    ) -> None:
+        """현재 비번 확인 후 password_hash 갱신. 현재 세션은 유지(재로그인 강제 안 함)."""
+        if user.password_hash is None:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="비밀번호를 사용할 수 없는 계정입니다.",
+            )
+        if not verify_password(payload.current_password, user.password_hash):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="현재 비밀번호가 일치하지 않습니다.",
+            )
+        if payload.new_password == payload.current_password:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="새 비밀번호가 기존과 동일합니다.",
+            )
+
+        user.password_hash = hash_password(payload.new_password)
+        db.commit()
 
     # ── 세션(access+refresh) 발급 헬퍼 ───────────────────────
     def _issue_session(self, db: Session, user_id: int) -> tuple[str, str]:

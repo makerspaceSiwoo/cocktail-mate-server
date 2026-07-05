@@ -21,6 +21,9 @@ from app.auth.dependencies import CurrentUser
 from app.auth.schemas import (
     LoginRequest,
     MessageResponse,
+    PasswordChangeRequest,
+    PasswordForgotRequest,
+    PasswordResetRequest,
     RequestVerificationRequest,
     RequestVerificationResponse,
     SignupRequest,
@@ -60,6 +63,14 @@ def _set_rl_email_request_verification(
 
 def _set_rl_email_login(request: Request, payload: LoginRequest) -> LoginRequest:
     """login 이메일 기준 rate limit 을 위해 파싱된 본문의 email 을 state 에 저장."""
+    request.state.rl_email = str(payload.email)
+    return payload
+
+
+def _set_rl_email_password_forgot(
+    request: Request, payload: PasswordForgotRequest
+) -> PasswordForgotRequest:
+    """password-forgot 이메일 기준 rate limit 을 위해 email 을 state 에 저장."""
     request.state.rl_email = str(payload.email)
     return payload
 
@@ -172,6 +183,43 @@ def logout(
 @router.get("/me", response_model=UserResponse)
 def me(current_user: CurrentUser):
     return _user_response(current_user)
+
+
+# ── 비밀번호 찾기/재설정/변경 ────────────────────────────────
+@router.post("/password/forgot", response_model=MessageResponse)
+@limiter.limit("1/minute", key_func=_email_from_json_key)  # 동일 이메일 1회/분
+@limiter.limit("10/hour")  # IP 10회/시간
+def password_forgot(
+    request: Request,
+    payload: PasswordForgotRequest = Depends(_set_rl_email_password_forgot),
+    db: Session = Depends(get_db),
+):
+    # 가입 여부 비노출 — 유저 존재 여부와 무관하게 항상 동일한 200.
+    service.password_forgot(db, str(payload.email))
+    return MessageResponse(message="비밀번호 재설정 링크를 발송했습니다.")
+
+
+@router.post("/password/reset", response_model=MessageResponse)
+@limiter.limit("10/hour")  # IP 10회/시간
+def password_reset(
+    request: Request,
+    payload: PasswordResetRequest,
+    db: Session = Depends(get_db),
+):
+    service.password_reset(db, payload)
+    return MessageResponse(message="비밀번호가 재설정되었습니다. 다시 로그인해 주세요.")
+
+
+@router.post("/password/change", response_model=MessageResponse)
+@limiter.limit("10/minute")  # IP 10회/분
+def password_change(
+    request: Request,
+    current_user: CurrentUser,
+    payload: PasswordChangeRequest,
+    db: Session = Depends(get_db),
+):
+    service.password_change(db, current_user, payload)
+    return MessageResponse(message="비밀번호가 변경되었습니다.")
 
 
 # ── 소셜 로그인 (카카오 등) ──────────────────────────────────

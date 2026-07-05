@@ -24,6 +24,7 @@ def _signup(client, monkeypatch, password, email="pw@example.com"):
         json={
             "request_id": request_id,
             "email": email,
+            "nickname": "테스터",
             "password": password,
             "password_confirm": password,
         },
@@ -65,6 +66,7 @@ def test_password_mismatch_rejected(client, monkeypatch):
         json={
             "request_id": request_id,
             "email": "mm@example.com",
+            "nickname": "테스터",
             "password": "abcd1234!",
             "password_confirm": "abcd9999!",
         },

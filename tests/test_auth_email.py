@@ -50,6 +50,7 @@ def test_signup_happy_path(client, monkeypatch, db):
         json={
             "request_id": request_id,
             "email": "siwoo@example.com",
+            "nickname": "시우",
             "password": "abcd1234!",
             "password_confirm": "abcd1234!",
         },
@@ -57,7 +58,7 @@ def test_signup_happy_path(client, monkeypatch, db):
     assert resp.status_code == 200, resp.text
     body = resp.json()
     assert body["email"] == "siwoo@example.com"
-    assert body["nickname"] == "siwoo"  # local-part 기반
+    assert body["nickname"] == "시우"  # 입력값 반영
     assert body["provider"] == "local"
 
     # 가입 즉시 로그인 → 쿠키 세팅
@@ -95,6 +96,7 @@ def test_signup_rejects_consumed_request_id(client, monkeypatch):
     payload = {
         "request_id": request_id,
         "email": "siwoo@example.com",
+        "nickname": "시우",
         "password": "abcd1234!",
         "password_confirm": "abcd1234!",
     }
@@ -114,6 +116,7 @@ def test_signup_rejects_email_mismatch(client, monkeypatch):
         json={
             "request_id": request_id,
             "email": "different@example.com",
+            "nickname": "다른유저",
             "password": "abcd1234!",
             "password_confirm": "abcd1234!",
         },
@@ -130,6 +133,7 @@ def test_signup_rejects_unverified(client, monkeypatch):
         json={
             "request_id": request_id,
             "email": "siwoo@example.com",
+            "nickname": "시우",
             "password": "abcd1234!",
             "password_confirm": "abcd1234!",
         },
@@ -137,33 +141,56 @@ def test_signup_rejects_unverified(client, monkeypatch):
     assert resp.status_code == 400
 
 
-def test_nickname_collision_suffix(client, monkeypatch, db):
-    """같은 local-part 이메일 가입 시 닉네임에 숫자 suffix."""
-    # 첫 유저: siwoo@example.com → siwoo
-    r1, t1 = _request_verification(client, monkeypatch, "siwoo@example.com")
-    client.post("/auth/email/verify", json={"token": t1})
-    client.post(
+def _signup(client, monkeypatch, email, nickname, password="abcd1234!"):
+    """request→verify→signup 을 한 번에 수행하고 응답을 반환."""
+    request_id, raw_token = _request_verification(client, monkeypatch, email)
+    client.post("/auth/email/verify", json={"token": raw_token})
+    return client.post(
         "/auth/signup",
         json={
-            "request_id": r1,
-            "email": "siwoo@example.com",
-            "password": "abcd1234!",
-            "password_confirm": "abcd1234!",
+            "request_id": request_id,
+            "email": email,
+            "nickname": nickname,
+            "password": password,
+            "password_confirm": password,
         },
     )
-    # 둘째 유저: siwoo@other.com → siwoo1
-    r2, t2 = _request_verification(client, monkeypatch, "siwoo@other.com")
-    client.post("/auth/email/verify", json={"token": t2})
-    resp = client.post(
-        "/auth/signup",
-        json={
-            "request_id": r2,
-            "email": "siwoo@other.com",
-            "password": "abcd1234!",
-            "password_confirm": "abcd1234!",
-        },
-    )
-    assert resp.json()["nickname"] == "siwoo1"
+
+
+def test_signup_uses_input_nickname(client, monkeypatch, db):
+    """입력한 닉네임이 그대로 반영된다(자동 생성 아님)."""
+    resp = _signup(client, monkeypatch, "siwoo@example.com", "칵테일러123")
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["nickname"] == "칵테일러123"
+
+
+def test_signup_duplicate_nickname_conflict(client, monkeypatch, db):
+    """이미 사용 중인 닉네임으로 가입 시 409."""
+    first = _signup(client, monkeypatch, "a@example.com", "중복닉")
+    assert first.status_code == 200, first.text
+    second = _signup(client, monkeypatch, "b@example.com", "중복닉")
+    assert second.status_code == 409
+    assert "닉네임" in second.json()["detail"]
+
+
+def test_signup_invalid_nickname_rejected(client, monkeypatch):
+    """닉네임 형식 위반(1자/11자/특수문자) → 422."""
+    for bad in ["a", "abcdefghijk", "닉네임!", "with space"]:
+        request_id, raw_token = _request_verification(
+            client, monkeypatch, "c@example.com"
+        )
+        client.post("/auth/email/verify", json={"token": raw_token})
+        resp = client.post(
+            "/auth/signup",
+            json={
+                "request_id": request_id,
+                "email": "c@example.com",
+                "nickname": bad,
+                "password": "abcd1234!",
+                "password_confirm": "abcd1234!",
+            },
+        )
+        assert resp.status_code == 422, f"nickname={bad!r} → {resp.status_code}"
 
 
 # ── 로그인/refresh/logout/me ─────────────────────────────────

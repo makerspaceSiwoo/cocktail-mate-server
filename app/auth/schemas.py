@@ -18,6 +18,18 @@ _HAS_LETTER_RE = re.compile(r"[A-Za-z]")
 _HAS_DIGIT_RE = re.compile(r"[0-9]")
 _HAS_SPECIAL_RE = re.compile(r"[!@#$]")
 
+# 닉네임: 한글·영문·숫자 2~10자.
+_NICKNAME_RE = re.compile(r"^[가-힣a-zA-Z0-9]{2,10}$")
+
+
+def validate_nickname(nickname: str) -> str:
+    """닉네임 정책(한글/영문/숫자 2~10자)을 검증하고 원본을 반환한다."""
+    if not _NICKNAME_RE.match(nickname):
+        raise ValueError(
+            "닉네임은 한글·영문·숫자 2~10자여야 합니다."
+        )
+    return nickname
+
 
 def validate_password_policy(password: str) -> str:
     """비밀번호 정책을 검증하고, 통과하면 원본을 그대로 반환한다."""
@@ -61,8 +73,14 @@ class VerifyEmailResponse(BaseModel):
 class SignupRequest(BaseModel):
     request_id: str
     email: EmailStr
+    nickname: str
     password: str
     password_confirm: str
+
+    @field_validator("nickname")
+    @classmethod
+    def _check_nickname(cls, v: str) -> str:
+        return validate_nickname(v)
 
     @field_validator("password")
     @classmethod
@@ -93,3 +111,42 @@ class UserResponse(BaseModel):
 
 class MessageResponse(BaseModel):
     message: str
+
+
+# ── 비밀번호 재설정/변경 ─────────────────────────────────────
+class PasswordForgotRequest(BaseModel):
+    email: EmailStr
+
+
+class PasswordResetRequest(BaseModel):
+    token: str
+    new_password: str
+    new_password_confirm: str
+
+    @field_validator("new_password")
+    @classmethod
+    def _check_password(cls, v: str) -> str:
+        return validate_password_policy(v)
+
+    @model_validator(mode="after")
+    def _check_confirm(self) -> "PasswordResetRequest":
+        if self.new_password != self.new_password_confirm:
+            raise ValueError("비밀번호가 일치하지 않습니다.")
+        return self
+
+
+class PasswordChangeRequest(BaseModel):
+    current_password: str
+    new_password: str
+    new_password_confirm: str
+
+    @field_validator("new_password")
+    @classmethod
+    def _check_password(cls, v: str) -> str:
+        return validate_password_policy(v)
+
+    @model_validator(mode="after")
+    def _check_confirm(self) -> "PasswordChangeRequest":
+        if self.new_password != self.new_password_confirm:
+            raise ValueError("비밀번호가 일치하지 않습니다.")
+        return self
