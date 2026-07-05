@@ -51,6 +51,9 @@ def _create_token(user_id: int, token_type: str, expires_delta: timedelta) -> st
         "type": token_type,
         "iat": now,
         "exp": now + expires_delta,
+        # jti: 같은 초에 재발급해도 토큰(및 그 sha256 해시)이 항상 달라지게 하는 nonce.
+        # (refresh rotation 시 동일 토큰/해시 충돌 방지)
+        "jti": secrets.token_urlsafe(8),
     }
     settings = get_settings()
     return jwt.encode(payload, settings.secret_key, algorithm=ALGORITHM)

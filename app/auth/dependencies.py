@@ -13,7 +13,6 @@ from sqlalchemy.orm import Session
 
 from cocktail_mate_db.models import User
 
-from app.auth.cookies import ACCESS_COOKIE
 from app.auth.repository import AuthRepository
 from app.core.database import get_db
 from app.core.security import JWTError, decode_token
