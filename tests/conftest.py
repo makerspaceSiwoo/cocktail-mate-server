@@ -21,8 +21,7 @@ os.environ.setdefault("COOKIE_SECURE", "false")
 os.environ.setdefault("FRONTEND_URL", "http://localhost:3000")
 os.environ.setdefault("KAKAO_CLIENT_ID", "test-kakao-id")
 os.environ.setdefault("KAKAO_REDIRECT_URI", "http://localhost:8000/auth/kakao/callback")
-# rate limit 이 기본 테스트를 방해하지 않게 비활성(전용 테스트에서만 활성).
-os.environ.setdefault("RATE_LIMIT_ENABLED", "true")
+# rate limit 은 fixture 에서 app.state.limiter.enabled 로 직접 토글한다.
 
 import pytest  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402

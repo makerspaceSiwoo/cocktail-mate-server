@@ -181,6 +181,16 @@ def _create_local_user(db, email="login@example.com", password="abcd1234!"):
     return user
 
 
+def _refresh_set_cookie_header(resp) -> str:
+    """응답의 Set-Cookie 헤더들 중 refresh_token 을 세팅하는 항목을 반환."""
+    for header in resp.headers.get_list("set-cookie"):
+        if header.startswith("refresh_token="):
+            return header
+    raise AssertionError(
+        f"refresh_token Set-Cookie 없음: {resp.headers.get_list('set-cookie')}"
+    )
+
+
 def test_login_success_and_me(client, db):
     _create_local_user(db)
     resp = client.post(
@@ -188,6 +198,12 @@ def test_login_success_and_me(client, db):
     )
     assert resp.status_code == 200, resp.text
     assert "access_token" in resp.cookies
+
+    # refresh 쿠키는 Path=/auth 로 스코프되어 /auth/refresh 와 /auth/logout 에 도달해야 한다.
+    refresh_cookie = _refresh_set_cookie_header(resp)
+    assert "Path=/auth" in refresh_cookie, refresh_cookie
+    # /auth/refresh 로만 좁게 스코프되면 logout 이 폐기 못 하므로 회귀 방지.
+    assert "Path=/auth/refresh" not in refresh_cookie, refresh_cookie
 
     me = client.get("/auth/me")
     assert me.status_code == 200
@@ -217,8 +233,11 @@ def test_me_requires_auth(client):
     assert client.get("/auth/me").status_code == 401
 
 
-def test_refresh_rotation_and_logout(client, db):
-    """refresh rotation → 기존 토큰 폐기 → logout 후 refresh 거부."""
+def test_refresh_rotation_reuse_rejected(client, db):
+    """refresh rotation → 기존 토큰 폐기 → 재사용 거부.
+
+    쿠키는 클라이언트 쿠키 jar 를 통해 브라우저처럼 전달한다(hand-injection 없음).
+    """
     from cocktail_mate_db.models import RefreshToken
 
     _create_local_user(db)
@@ -227,14 +246,16 @@ def test_refresh_rotation_and_logout(client, db):
     )
     old_refresh = login.cookies["refresh_token"]
 
-    # refresh 호출
-    resp = client.post("/auth/refresh", cookies={"refresh_token": old_refresh})
+    # refresh 호출 — jar 에 담긴 refresh 쿠키가 그대로 전송됨.
+    resp = client.post("/auth/refresh")
     assert resp.status_code == 200, resp.text
     new_refresh = resp.cookies["refresh_token"]
     assert new_refresh != old_refresh
 
-    # 기존(old) refresh 는 rotation 으로 폐기됨 → 재사용 거부
-    reuse = client.post("/auth/refresh", cookies={"refresh_token": old_refresh})
+    # 기존(old) refresh 는 rotation 으로 폐기됨 → 재사용 거부.
+    # (jar 는 이미 new_refresh 로 갱신됐으므로 old 는 명시적으로 실어 재사용을 시뮬레이트.)
+    client.cookies.set("refresh_token", old_refresh, path="/auth")
+    reuse = client.post("/auth/refresh")
     assert reuse.status_code == 401
 
     # DB: old 토큰 revoked
@@ -242,7 +263,32 @@ def test_refresh_rotation_and_logout(client, db):
     old_row = db.query(RefreshToken).filter_by(token_hash=old_hash).one()
     assert old_row.revoked_at is not None
 
-    # logout → new refresh 폐기
-    client.post("/auth/logout", cookies={"refresh_token": new_refresh})
-    after = client.post("/auth/refresh", cookies={"refresh_token": new_refresh})
+
+def test_logout_revokes_refresh_server_side(client, db):
+    """logout 은 hand-injection 없이도 서버측에서 refresh 를 폐기해야 한다.
+
+    Critical 2 회귀 방지: refresh 쿠키가 Path=/auth 라서 브라우저(그리고 jar)가
+    /auth/logout 에도 쿠키를 실어 보내고, 서버가 revoked_at 을 기록 → 이후 refresh 401.
+    이전엔 Path=/auth/refresh 라 logout 에 쿠키가 도달하지 못해 토큰이 살아있었다.
+    """
+    from cocktail_mate_db.models import RefreshToken
+
+    _create_local_user(db)
+    login = client.post(
+        "/auth/login", json={"email": "login@example.com", "password": "abcd1234!"}
+    )
+    refresh = login.cookies["refresh_token"]
+
+    # jar 에 담긴 쿠키만으로 logout — hand-injected cookies 없음.
+    logout = client.post("/auth/logout")
+    assert logout.status_code == 200, logout.text
+
+    # DB: 서버측 폐기 확인.
+    row = db.query(RefreshToken).filter_by(token_hash=hash_token(refresh)).one()
+    assert row.revoked_at is not None
+
+    # 폐기된 토큰으로 refresh 시도 → 401 (jar 는 logout 응답의 delete-cookie 로 비워졌을 수
+    # 있으므로 명시적으로 실어 서버측 폐기를 검증).
+    client.cookies.set("refresh_token", refresh, path="/auth")
+    after = client.post("/auth/refresh")
     assert after.status_code == 401

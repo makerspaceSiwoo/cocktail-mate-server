@@ -41,10 +41,10 @@ def test_kakao_new_user_signup(client, db, monkeypatch):
     monkeypatch.setattr(KakaoProvider, "exchange_code", _exchange)
     monkeypatch.setattr(KakaoProvider, "fetch_profile", _profile)
 
+    # oauth_state 쿠키는 _prime_state 가 이미 jar 에 세팅함 (hand-injection 불필요).
     resp = client.get(
         "/auth/kakao/callback",
         params={"code": "authcode", "state": state},
-        cookies={"oauth_state": state},
         follow_redirects=False,
     )
     assert resp.status_code == 302, resp.text
@@ -88,7 +88,6 @@ def test_kakao_existing_user_login(client, db, monkeypatch):
     resp = client.get(
         "/auth/kakao/callback",
         params={"code": "c", "state": state},
-        cookies={"oauth_state": state},
         follow_redirects=False,
     )
     assert resp.status_code == 302
@@ -117,7 +116,6 @@ def test_kakao_email_consent_required(client, db, monkeypatch):
     resp = client.get(
         "/auth/kakao/callback",
         params={"code": "c", "state": state},
-        cookies={"oauth_state": state},
         follow_redirects=False,
     )
     assert resp.status_code == 400
@@ -130,10 +128,11 @@ def test_kakao_email_consent_required(client, db, monkeypatch):
 
 def test_kakao_state_mismatch_rejected(client, monkeypatch):
     _prime_state(client)
+    # 쿠키의 state 와 쿼리 state 가 불일치 → CSRF 거부. (mismatch 가 이 테스트의 핵심)
+    client.cookies.set("oauth_state", "real-state", path="/auth/kakao/callback")
     resp = client.get(
         "/auth/kakao/callback",
         params={"code": "c", "state": "attacker-state"},
-        cookies={"oauth_state": "real-state"},
         follow_redirects=False,
     )
     assert resp.status_code == 400
