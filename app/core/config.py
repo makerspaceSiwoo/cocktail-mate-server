@@ -29,8 +29,11 @@ class Settings(BaseSettings):
     storage_public_base_url: str = "http://localhost:9000/cocktail-images"
 
     # ---- CORS ----
-    # production 에서 허용할 프론트 origin 목록(콤마 구분). 예) "https://foo.vercel.app"
+    # production 에서 허용할 프론트 origin 목록(콤마 구분). 프론트 origin 3개를 등록한다:
+    #   로컬 개발 / 테스트(preview) / 프로덕션 Vercel.
+    #   예) "https://cocktail-mate.vercel.app,https://cocktail-mate-preview.vercel.app,http://localhost:3000"
     # 개발 환경(app_env != production)에서는 localhost 모든 포트가 자동 허용된다.
+    # 이 목록은 CSRF 미들웨어(app/core/csrf.py)의 Origin allowlist 로도 재사용된다.
     cors_origins: str = ""
 
     # ---- Auth (JWT 쿠키) ----
@@ -55,7 +58,9 @@ class Settings(BaseSettings):
     kakao_redirect_uri: str = "http://localhost:8000/auth/kakao/callback"
 
     # ---- 쿠키 ----
-    # 프로덕션(HTTPS)에서는 반드시 true. 로컬 http 개발에서는 false 가능.
+    # 쿠키 flag(secure/samesite)는 요청 Origin 기준으로 동적 결정된다
+    # (app/auth/cookies.py resolve_cookie_flags). 아래 정적 값은 이제
+    # **Origin 헤더가 없는 요청(카카오 콜백 등 top-level 리다이렉트)의 fallback** 으로만 쓰인다.
     cookie_secure: bool = True
     cookie_samesite: str = "lax"
 

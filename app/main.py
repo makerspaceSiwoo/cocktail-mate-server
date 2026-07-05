@@ -13,6 +13,7 @@ from app import cocktail
 from app.auth.router import router as auth_router
 from app.cocktail.router import router as cocktail_router
 from app.core.config import get_settings
+from app.core.csrf import CSRFOriginMiddleware
 from app.core.database import engine
 from app.core.rate_limit import limiter
 from app.core.storage import check_bucket
@@ -47,6 +48,11 @@ def create_app() -> FastAPI:
         # 개발 환경: localhost / 127.0.0.1 의 모든 포트(3000, 6006 등)를 자동 허용
         cors_kwargs["allow_origin_regex"] = r"https?://(localhost|127\.0\.0\.1)(:\d+)?"
     app.add_middleware(CORSMiddleware, **cors_kwargs)
+
+    # ── CSRF 방어 (Origin allowlist) ──
+    # SameSite=None 쿠키(크로스 도메인)에서 cross-site POST 위조를 막는다.
+    # unsafe 메서드의 Origin 을 CORS 허용 목록과 대조 (자세한 규칙은 csrf.py).
+    app.add_middleware(CSRFOriginMiddleware, settings=settings)
 
     app.include_router(cocktail_router)
     app.include_router(auth_router)
