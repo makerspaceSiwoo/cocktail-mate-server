@@ -278,28 +278,36 @@ class AuthService:
                 detail="refresh 토큰이 만료되었습니다.",
             )
 
-        # rotation: 기존 토큰 폐기 후 신규 발급.
-        self.repository.revoke_refresh_token(db, stored, _now())
+        # rotation: 신규 발급. _issue_session 이 기존 행(stored 포함)을 먼저 삭제하므로
+        # 별도 revoke 는 불필요 — 삭제 기반 단일 세션.
         access_token, refresh_token = self._issue_session(db, stored.user_id)
         db.commit()
         return access_token, refresh_token
 
     # ── 로그아웃 ─────────────────────────────────────────────
     def logout(self, db: Session, raw_refresh_token: str | None) -> None:
-        """refresh 토큰이 있으면 revoked_at 기록 (없어도 성공)."""
+        """refresh 토큰이 있으면 해당 user 의 refresh 행을 삭제 (없어도 성공).
+
+        삭제 기반 단일 세션: revoked 행을 남기지 않고 0행으로 정리한다.
+        """
         if not raw_refresh_token:
             return
         stored = self.repository.get_refresh_token_by_hash(
             db, hash_token(raw_refresh_token)
         )
-        if stored is not None and stored.revoked_at is None:
-            self.repository.revoke_refresh_token(db, stored, _now())
+        if stored is not None:
+            self.repository.delete_refresh_tokens_for_user(db, stored.user_id)
             db.commit()
 
     # ── 세션(access+refresh) 발급 헬퍼 ───────────────────────
     def _issue_session(self, db: Session, user_id: int) -> tuple[str, str]:
-        """access JWT + refresh JWT 발급 & refresh_tokens 행 생성. 커밋은 호출부."""
+        """access JWT + refresh JWT 발급 & refresh_tokens 행 생성. 커밋은 호출부.
+
+        단일 세션 정책: 신규 행 삽입 전에 해당 user 의 기존 refresh 행을 모두 삭제한다.
+        → login/signup/refresh/kakao 모두 user 당 정확히 1행으로 수렴.
+        """
         settings = get_settings()
+        self.repository.delete_refresh_tokens_for_user(db, user_id)
         access_token = create_access_token(user_id)
         refresh_token = create_refresh_token(user_id)
         expires_at = _now() + timedelta(days=settings.refresh_token_expire_days)

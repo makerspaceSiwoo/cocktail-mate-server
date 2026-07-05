@@ -258,17 +258,16 @@ def test_refresh_rotation_reuse_rejected(client, db):
     reuse = client.post("/auth/refresh")
     assert reuse.status_code == 401
 
-    # DB: old 토큰 revoked
+    # DB: 삭제 기반 단일 세션 — old 행은 revoked 가 아니라 삭제되어 존재하지 않는다.
     old_hash = hash_token(old_refresh)
-    old_row = db.query(RefreshToken).filter_by(token_hash=old_hash).one()
-    assert old_row.revoked_at is not None
+    assert db.query(RefreshToken).filter_by(token_hash=old_hash).one_or_none() is None
 
 
 def test_logout_revokes_refresh_server_side(client, db):
     """logout 은 hand-injection 없이도 서버측에서 refresh 를 폐기해야 한다.
 
     Critical 2 회귀 방지: refresh 쿠키가 Path=/auth 라서 브라우저(그리고 jar)가
-    /auth/logout 에도 쿠키를 실어 보내고, 서버가 revoked_at 을 기록 → 이후 refresh 401.
+    /auth/logout 에도 쿠키를 실어 보내고, 서버가 행을 삭제 → 이후 refresh 401.
     이전엔 Path=/auth/refresh 라 logout 에 쿠키가 도달하지 못해 토큰이 살아있었다.
     """
     from cocktail_mate_db.models import RefreshToken
@@ -283,12 +282,63 @@ def test_logout_revokes_refresh_server_side(client, db):
     logout = client.post("/auth/logout")
     assert logout.status_code == 200, logout.text
 
-    # DB: 서버측 폐기 확인.
-    row = db.query(RefreshToken).filter_by(token_hash=hash_token(refresh)).one()
-    assert row.revoked_at is not None
+    # DB: 삭제 기반 단일 세션 — 행이 revoked 가 아니라 삭제되어 존재하지 않는다.
+    row = (
+        db.query(RefreshToken).filter_by(token_hash=hash_token(refresh)).one_or_none()
+    )
+    assert row is None
 
     # 폐기된 토큰으로 refresh 시도 → 401 (jar 는 logout 응답의 delete-cookie 로 비워졌을 수
     # 있으므로 명시적으로 실어 서버측 폐기를 검증).
     client.cookies.set("refresh_token", refresh, path="/auth")
     after = client.post("/auth/refresh")
     assert after.status_code == 401
+
+
+def _user_refresh_row_count(db, user_id: int) -> int:
+    """해당 user 의 refresh_tokens 행 수를 DB 에서 직접 카운트."""
+    from cocktail_mate_db.models import RefreshToken
+
+    # 세션 캐시가 아닌 실제 DB 상태를 반영하도록 만료 후 카운트.
+    db.expire_all()
+    return db.query(RefreshToken).filter_by(user_id=user_id).count()
+
+
+def test_single_session_invariant_one_row_per_user(client, db):
+    """단일 세션 불변식: login→refresh→refresh, login→login 모두 user 당 refresh 행 == 1."""
+    user = _create_local_user(db)
+
+    # login → refresh → refresh
+    client.post(
+        "/auth/login", json={"email": "login@example.com", "password": "abcd1234!"}
+    )
+    assert _user_refresh_row_count(db, user.id) == 1
+    r1 = client.post("/auth/refresh")
+    assert r1.status_code == 200, r1.text
+    assert _user_refresh_row_count(db, user.id) == 1
+    r2 = client.post("/auth/refresh")
+    assert r2.status_code == 200, r2.text
+    assert _user_refresh_row_count(db, user.id) == 1
+
+    # 별도로: 재로그인(login → login) 도 누적 없이 1행 유지.
+    client.post(
+        "/auth/login", json={"email": "login@example.com", "password": "abcd1234!"}
+    )
+    assert _user_refresh_row_count(db, user.id) == 1
+    client.post(
+        "/auth/login", json={"email": "login@example.com", "password": "abcd1234!"}
+    )
+    assert _user_refresh_row_count(db, user.id) == 1
+
+
+def test_logout_leaves_zero_rows(client, db):
+    """logout 후 해당 user 의 refresh_tokens 행 == 0 (revoked 잔재 없음)."""
+    user = _create_local_user(db)
+    client.post(
+        "/auth/login", json={"email": "login@example.com", "password": "abcd1234!"}
+    )
+    assert _user_refresh_row_count(db, user.id) == 1
+
+    logout = client.post("/auth/logout")
+    assert logout.status_code == 200, logout.text
+    assert _user_refresh_row_count(db, user.id) == 0

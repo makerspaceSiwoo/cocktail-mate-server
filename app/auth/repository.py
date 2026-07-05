@@ -6,7 +6,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
 from cocktail_mate_db.models import EmailVerification, RefreshToken, User
@@ -91,4 +91,12 @@ class AuthRepository:
         self, db: Session, refresh_token: RefreshToken, now: datetime
     ) -> None:
         refresh_token.revoked_at = now
+        db.flush()
+
+    def delete_refresh_tokens_for_user(self, db: Session, user_id: int) -> None:
+        """해당 user 의 refresh_tokens 행을 전부 삭제 (단일 세션 보장용).
+
+        revoked_at 로 남겨두면 행이 무한 누적되므로 삭제로 정리한다.
+        """
+        db.execute(delete(RefreshToken).where(RefreshToken.user_id == user_id))
         db.flush()
