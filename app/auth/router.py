@@ -50,9 +50,30 @@ _STATE_COOKIE = "oauth_state"
 
 
 def _email_from_json_key(request: Request) -> str:
-    """이메일 기준 rate limit key — 캐시된 본문의 email (없으면 IP)."""
+    """이메일 기준 rate limit key — request.state.rl_email (없으면 IP).
+
+    rl_email 은 아래 `_set_rl_email_*` 의존성이 slowapi key_func 평가 전에 설정한다.
+    (FastAPI 가 본문 파싱 등 의존성을 slowapi 래퍼보다 먼저 실행하기 때문.)
+    """
     email = getattr(request.state, "rl_email", None)
     return f"email:{email}" if email else get_remote_address(request)
+
+
+def _set_rl_email_request_verification(
+    request: Request, payload: RequestVerificationRequest
+) -> RequestVerificationRequest:
+    """이메일 기준 rate limit 을 위해 파싱된 본문의 email 을 state 에 저장.
+
+    이 의존성은 slowapi 데코레이터 래퍼보다 먼저 실행되므로 key_func 가 참조할 수 있다.
+    """
+    request.state.rl_email = str(payload.email)
+    return payload
+
+
+def _set_rl_email_login(request: Request, payload: LoginRequest) -> LoginRequest:
+    """login 이메일 기준 rate limit 을 위해 파싱된 본문의 email 을 state 에 저장."""
+    request.state.rl_email = str(payload.email)
+    return payload
 
 
 def _user_response(user) -> UserResponse:
@@ -69,16 +90,14 @@ def _user_response(user) -> UserResponse:
 @router.post(
     "/email/request-verification", response_model=RequestVerificationResponse
 )
-@limiter.limit("5/hour;10/hour", key_func=_email_from_json_key)  # 동일 이메일 5회/시간
+@limiter.limit("5/hour", key_func=_email_from_json_key)  # 동일 이메일 5회/시간
 @limiter.limit("1/minute", key_func=_email_from_json_key)  # 동일 이메일 1회/분
 @limiter.limit("10/hour")  # IP 10회/시간
 def request_verification(
     request: Request,
-    payload: RequestVerificationRequest,
+    payload: RequestVerificationRequest = Depends(_set_rl_email_request_verification),
     db: Session = Depends(get_db),
 ):
-    # 이메일 기준 limit key 를 위해 state 에 저장 (limiter key_func 가 참조).
-    request.state.rl_email = str(payload.email)
     request_id = service.request_verification(db, str(payload.email))
     return RequestVerificationResponse(request_id=request_id)
 
@@ -127,11 +146,10 @@ def signup(
 @limiter.limit("10/minute")  # IP 10회/분
 def login(
     request: Request,
-    payload: LoginRequest,
     response: Response,
+    payload: LoginRequest = Depends(_set_rl_email_login),
     db: Session = Depends(get_db),
 ):
-    request.state.rl_email = str(payload.email)
     user, access_token, refresh_token = service.login(
         db, str(payload.email), payload.password
     )
