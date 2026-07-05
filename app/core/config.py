@@ -45,6 +45,8 @@ class Settings(BaseSettings):
     access_token_expire_minutes: int = 30
     refresh_token_expire_days: int = 14
     email_verify_expire_hours: int = 24
+    # 비밀번호 재설정 JWT 만료(분). 토큰은 DB 저장 없이 secret_key+password_hash 로 서명.
+    reset_token_expire_minutes: int = 30
 
     # 매직 링크가 여는 프론트 주소 (verify-email 페이지 및 소셜 콜백 후 리다이렉트 대상)
     frontend_url: str = "http://localhost:3000"

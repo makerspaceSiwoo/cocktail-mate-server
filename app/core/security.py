@@ -81,6 +81,69 @@ def decode_token(token: str) -> dict:
     return jwt.decode(token, settings.secret_key, algorithms=[ALGORITHM])
 
 
+# ── 비밀번호 재설정 토큰 (DB 저장 없음) ─────────────────────────
+# 서명키에 유저의 현재 password_hash 를 섞는다 → 비번이 바뀌면 서명이 자동 무효(1회용).
+def _reset_signing_key(password_hash: str) -> str:
+    settings = get_settings()
+    return settings.secret_key + password_hash
+
+
+def create_password_reset_token(user_id: int, password_hash: str) -> str:
+    """비밀번호 재설정 JWT 발급.
+
+    서명키 = secret_key + 현재 password_hash. 재설정으로 password_hash 가 바뀌면
+    같은 토큰의 서명이 더 이상 검증되지 않으므로 자연스럽게 1회용이 된다.
+    """
+    settings = get_settings()
+    now = datetime.now(timezone.utc)
+    payload = {
+        "sub": str(user_id),
+        "type": "password_reset",
+        "iat": now,
+        "exp": now + timedelta(minutes=settings.reset_token_expire_minutes),
+    }
+    return jwt.encode(
+        payload, _reset_signing_key(password_hash), algorithm=ALGORITHM
+    )
+
+
+def extract_reset_token_subject(token: str) -> int:
+    """서명 검증 없이 sub(user_id)만 추출한다.
+
+    password_hash 를 알아야 정식 검증이 가능한데, 그 전에 어떤 유저인지 먼저 알아야 하므로
+    sub 만 우선 꺼낸다. 반드시 이후 decode_password_reset_token 으로 정식 검증할 것.
+    실패 시 jose.JWTError 를 던진다.
+    """
+    # 서명/만료 모두 여기서는 검증하지 않는다 — sub 만 추출하는 것이 목적.
+    # (정식 검증은 password_hash 를 아는 decode_password_reset_token 에서 수행.)
+    payload = jwt.decode(
+        token,
+        key="",
+        options={"verify_signature": False, "verify_exp": False},
+    )
+    sub = payload.get("sub")
+    if sub is None:
+        raise JWTError("sub 없음")
+    return int(sub)
+
+
+def decode_password_reset_token(token: str, password_hash: str) -> int:
+    """secret_key+password_hash 키로 재설정 JWT 를 정식 검증한다.
+
+    서명 불일치/만료/type≠password_reset 이면 jose.JWTError 를 던진다.
+    성공 시 user_id(int) 반환.
+    """
+    payload = jwt.decode(
+        token, _reset_signing_key(password_hash), algorithms=[ALGORITHM]
+    )
+    if payload.get("type") != "password_reset":
+        raise JWTError("잘못된 토큰 타입")
+    sub = payload.get("sub")
+    if sub is None:
+        raise JWTError("sub 없음")
+    return int(sub)
+
+
 # JWTError 를 밖에서 잡을 수 있게 재노출.
 __all__ = [
     "JWTError",
@@ -90,6 +153,9 @@ __all__ = [
     "create_access_token",
     "create_refresh_token",
     "decode_token",
+    "create_password_reset_token",
+    "extract_reset_token_subject",
+    "decode_password_reset_token",
     "generate_random_token",
     "hash_token",
 ]

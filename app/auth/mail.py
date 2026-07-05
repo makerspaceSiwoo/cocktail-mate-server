@@ -20,6 +20,7 @@ logger = logging.getLogger("app.auth.mail")
 RESEND_API_URL = "https://api.resend.com/emails"
 
 MAIL_SUBJECT = "칵테일메이트 이메일 인증"
+RESET_MAIL_SUBJECT = "칵테일메이트 비밀번호 재설정"
 
 
 def _build_html(verify_url: str) -> str:
@@ -28,6 +29,16 @@ def _build_html(verify_url: str) -> str:
         "<p>칵테일메이트 이메일 인증</p>"
         f'<p>아래 링크를 눌러 인증을 완료하세요:</p>'
         f'<p><a href="{verify_url}">{verify_url}</a></p>'
+        "<p>본인이 요청하지 않았다면 이 메일을 무시하세요.</p>"
+    )
+
+
+def _build_reset_html(reset_url: str) -> str:
+    """비밀번호 재설정 메일 HTML 본문을 생성한다."""
+    return (
+        "<p>칵테일메이트 비밀번호 재설정</p>"
+        f'<p>아래 링크를 눌러 비밀번호를 재설정하세요:</p>'
+        f'<p><a href="{reset_url}">{reset_url}</a></p>'
         "<p>본인이 요청하지 않았다면 이 메일을 무시하세요.</p>"
     )
 
@@ -43,21 +54,40 @@ def send_verification_email(email: str, verify_url: str) -> None:
     발송 실패 시 예외를 던지지 않고 로그만 남긴다
     (호출부가 request_id 는 이미 발급했고, 사용자는 재요청 가능하므로).
     """
+    _send_email(email, MAIL_SUBJECT, verify_url, _build_html(verify_url))
+
+
+def send_password_reset_email(email: str, reset_url: str) -> None:
+    """비밀번호 재설정 링크 메일을 발송한다.
+
+    백엔드 선택/실패 처리는 send_verification_email 과 동일 (SMTP>Resend>콘솔,
+    실패 시 예외 대신 로그).
+    """
+    _send_email(email, RESET_MAIL_SUBJECT, reset_url, _build_reset_html(reset_url))
+
+
+def _send_email(email: str, subject: str, url: str, html: str) -> None:
+    """설정된 백엔드(SMTP>Resend>콘솔)로 메일을 발송한다.
+
+    발송 실패 시 예외를 던지지 않고 로그만 남긴다.
+    """
     settings = get_settings()
 
     if settings.smtp_host and settings.smtp_user and settings.smtp_password:
-        _send_via_smtp(settings, email, verify_url)
+        _send_via_smtp(settings, email, subject, url, html)
         return
 
     if settings.mail_api_key:
-        _send_via_resend(settings, email, verify_url)
+        _send_via_resend(settings, email, subject, html)
         return
 
-    logger.info("[MAIL:console] to=%s verify_url=%s", email, verify_url)
+    logger.info("[MAIL:console] to=%s subject=%s url=%s", email, subject, url)
 
 
-def _send_via_smtp(settings, email: str, verify_url: str) -> None:
-    """SMTP(STARTTLS) 로 인증 메일을 발송한다 (Gmail SMTP 등).
+def _send_via_smtp(
+    settings, email: str, subject: str, url: str, html: str
+) -> None:
+    """SMTP(STARTTLS) 로 메일을 발송한다 (Gmail SMTP 등).
 
     Gmail 은 인증한 계정으로 From 헤더를 덮어쓰므로 MAIL_FROM 은 Gmail 주소
     (또는 "이름 <addr@gmail.com>") 로 두는 것을 권장한다.
@@ -65,9 +95,9 @@ def _send_via_smtp(settings, email: str, verify_url: str) -> None:
     msg = EmailMessage()
     msg["From"] = settings.mail_from
     msg["To"] = email
-    msg["Subject"] = MAIL_SUBJECT
-    msg.set_content(verify_url)  # plain-text fallback
-    msg.add_alternative(_build_html(verify_url), subtype="html")
+    msg["Subject"] = subject
+    msg.set_content(url)  # plain-text fallback
+    msg.add_alternative(html, subtype="html")
 
     try:
         with smtplib.SMTP(settings.smtp_host, settings.smtp_port, timeout=10) as smtp:
@@ -75,11 +105,11 @@ def _send_via_smtp(settings, email: str, verify_url: str) -> None:
             smtp.login(settings.smtp_user, settings.smtp_password)
             smtp.send_message(msg)
     except Exception:  # noqa: BLE001 - 발송 실패는 로깅만 (요청 흐름 차단 안 함)
-        logger.exception("verification email(SMTP) 발송 실패 to=%s", email)
+        logger.exception("email(SMTP) 발송 실패 to=%s subject=%s", email, subject)
 
 
-def _send_via_resend(settings, email: str, verify_url: str) -> None:
-    """Resend HTTP API 로 인증 메일을 발송한다."""
+def _send_via_resend(settings, email: str, subject: str, html: str) -> None:
+    """Resend HTTP API 로 메일을 발송한다."""
     try:
         resp = httpx.post(
             RESEND_API_URL,
@@ -87,11 +117,11 @@ def _send_via_resend(settings, email: str, verify_url: str) -> None:
             json={
                 "from": settings.mail_from,
                 "to": [email],
-                "subject": MAIL_SUBJECT,
-                "html": _build_html(verify_url),
+                "subject": subject,
+                "html": html,
             },
             timeout=10.0,
         )
         resp.raise_for_status()
     except Exception:  # noqa: BLE001 - 발송 실패는 로깅만 (요청 흐름 차단 안 함)
-        logger.exception("verification email 발송 실패 to=%s", email)
+        logger.exception("email 발송 실패 to=%s subject=%s", email, subject)
