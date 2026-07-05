@@ -13,13 +13,13 @@ import re
 from pydantic import BaseModel, EmailStr, field_validator, model_validator
 
 # 허용 문자 전체(길이 포함) 화이트리스트.
-_PASSWORD_ALLOWED_RE = re.compile(r"^[A-Za-z0-9!@#$]{8,}$")
+_PASSWORD_ALLOWED_RE = re.compile(r"^[A-Za-z0-9!@#$]{8,}\Z")
 _HAS_LETTER_RE = re.compile(r"[A-Za-z]")
 _HAS_DIGIT_RE = re.compile(r"[0-9]")
 _HAS_SPECIAL_RE = re.compile(r"[!@#$]")
 
 # 닉네임: 한글·영문·숫자 2~10자.
-_NICKNAME_RE = re.compile(r"^[가-힣a-zA-Z0-9]{2,10}$")
+_NICKNAME_RE = re.compile(r"^[가-힣a-zA-Z0-9]{2,10}\Z")
 
 
 def validate_nickname(nickname: str) -> str:
