@@ -137,7 +137,7 @@ def signup(
     db: Session = Depends(get_db),
 ):
     user, access_token, refresh_token = service.signup(db, payload)
-    set_auth_cookies(response, access_token, refresh_token)
+    set_auth_cookies(response, access_token, refresh_token, request)
     return _user_response(user)
 
 
@@ -153,7 +153,7 @@ def login(
     user, access_token, refresh_token = service.login(
         db, str(payload.email), payload.password
     )
-    set_auth_cookies(response, access_token, refresh_token)
+    set_auth_cookies(response, access_token, refresh_token, request)
     return _user_response(user)
 
 
@@ -165,7 +165,7 @@ def refresh(
 ):
     raw_refresh = request.cookies.get(REFRESH_COOKIE)
     access_token, refresh_token = service.refresh(db, raw_refresh or "")
-    set_auth_cookies(response, access_token, refresh_token)
+    set_auth_cookies(response, access_token, refresh_token, request)
     return MessageResponse(message="토큰이 갱신되었습니다.")
 
 
@@ -177,7 +177,7 @@ def logout(
 ):
     raw_refresh = request.cookies.get(REFRESH_COOKIE)
     service.logout(db, raw_refresh)
-    clear_auth_cookies(response)
+    clear_auth_cookies(response, request)
     return MessageResponse(message="로그아웃 되었습니다.")
 
 
@@ -267,6 +267,8 @@ async def social_login_callback(
     redirect = RedirectResponse(
         url=settings.frontend_url, status_code=status.HTTP_302_FOUND
     )
-    set_auth_cookies(redirect, jwt_access, jwt_refresh)
+    # 카카오 콜백은 top-level GET 리다이렉트라 Origin 헤더가 없다 →
+    # resolve_cookie_flags 가 정적 fallback(settings) 을 쓴다. request 를 넘겨도 무방.
+    set_auth_cookies(redirect, jwt_access, jwt_refresh, request)
     redirect.delete_cookie(_STATE_COOKIE, path=f"/auth/{provider}/callback")
     return redirect
