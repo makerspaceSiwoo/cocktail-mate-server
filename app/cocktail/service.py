@@ -6,11 +6,17 @@
 from sqlalchemy.orm import Session
 
 from app.cocktail.repository import CocktailRepository
+from app.like.repository import LikeRepository
 
 
 class CocktailService:
-    def __init__(self, repository: CocktailRepository | None = None) -> None:
+    def __init__(
+        self,
+        repository: CocktailRepository | None = None,
+        like_repository: LikeRepository | None = None,
+    ) -> None:
         self.repository = repository or CocktailRepository()
+        self.like_repository = like_repository or LikeRepository()
 
     def list_cocktails(
         self,
@@ -18,8 +24,15 @@ class CocktailService:
         page: int,
         rpp: int,
         base: str | None,
+        user_id: int | None = None,
     ) -> dict:
-        return self.repository.list_all(db, page, rpp, base)
+        # 로그인 유저면 좋아요 집합을 조회해 각 항목의 is_liked 를 채운다.
+        liked_ids = (
+            self.like_repository.liked_cocktail_ids(db, user_id)
+            if user_id is not None
+            else None
+        )
+        return self.repository.list_all(db, page, rpp, base, liked_ids)
     
     def get_base_tags(self, db: Session) -> dict:
         return self.repository.get_base_tags(db)

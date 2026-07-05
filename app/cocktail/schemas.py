@@ -56,6 +56,8 @@ class CocktailListItem(BaseModel):
     description: str | None = None
     abv: float | None = None
     glass: str | None = None
+    # 로그인 시 해당 유저의 좋아요 여부. 비로그인은 항상 False.
+    isLiked: bool = False
 
 
 class CocktailListMeta(BaseModel):

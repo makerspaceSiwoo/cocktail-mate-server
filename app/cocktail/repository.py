@@ -18,6 +18,7 @@ class CocktailRepository:
         page: int,
         rpp: int,
         base: str | None,
+        liked_ids: set[int] | None = None,
     ) -> dict:
         query = db.query(Cocktail)
 
@@ -34,6 +35,7 @@ class CocktailRepository:
 
         has_next_page = len(cocktails) > rpp
         cocktails = cocktails[:rpp]
+        liked_ids = liked_ids or set()
 
         return {
             "items": [
@@ -46,6 +48,7 @@ class CocktailRepository:
                     "description": cocktail.description,
                     "abv": cocktail.abv,
                     "glass": cocktail.glass,
+                    "isLiked": cocktail.id in liked_ids,
                 }
                 for cocktail in cocktails
             ],

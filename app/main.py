@@ -5,15 +5,20 @@
 """
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from slowapi.errors import RateLimitExceeded
+from slowapi.middleware import SlowAPIMiddleware
 from sqlalchemy import text
 
 from app import cocktail
+from app.auth.router import router as auth_router
 from app.cocktail.router import router as cocktail_router
 from app.core.config import get_settings
 from app.core.database import engine
+from app.core.rate_limit import limiter
 from app.core.storage import check_bucket
 from app.like.router import router as like_router
-from app.user.router import router as user_router
+
+from slowapi import _rate_limit_exceeded_handler
 
 from cocktail_mate_db.models.cocktail import Cocktail
 from app.core.database import SessionLocal
@@ -26,6 +31,12 @@ def create_app() -> FastAPI:
     # (민감 데이터 없음. 추후 필요하면 Basic Auth 등으로 보호 가능.)
     # @TODO 개발 완료 후 production에서 docs 접근 auth 추가
     app = FastAPI(title="cocktail-mate-server")
+
+    # ── Rate limiting (slowapi) ──
+    app.state.limiter = limiter
+    app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+    app.add_middleware(SlowAPIMiddleware)
+
     cors_kwargs: dict = {
         "allow_origins": settings.cors_origin_list,
         "allow_credentials": True,
@@ -38,7 +49,7 @@ def create_app() -> FastAPI:
     app.add_middleware(CORSMiddleware, **cors_kwargs)
 
     app.include_router(cocktail_router)
-    app.include_router(user_router)
+    app.include_router(auth_router)
     app.include_router(like_router)
 
     @app.get("/health", tags=["infra"])

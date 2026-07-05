@@ -1,6 +1,14 @@
-"""좋아요 라우터. 경로/응답은 기존 구현과 동일 (prefix 없음)."""
-from fastapi import APIRouter
+"""좋아요 라우터.
 
+- POST   /cocktails/{id}/like   : 좋아요 등록 (로그인 필수)
+- DELETE /cocktails/{id}/like   : 좋아요 해제 (로그인 필수)
+- GET    /like/list             : 내 좋아요 목록 (로그인 필수, 경로 유지)
+"""
+from fastapi import APIRouter, Depends
+from sqlalchemy.orm import Session
+
+from app.auth.dependencies import CurrentUser
+from app.core.database import get_db
 from app.like.schemas import LikeActionResponse, LikeListResponse
 from app.like.service import LikeService
 
@@ -9,15 +17,23 @@ service = LikeService()
 
 
 @router.get("/like/list", response_model=LikeListResponse)
-def get_like_list():
-    return service.like_list()
+def get_like_list(current_user: CurrentUser, db: Session = Depends(get_db)):
+    return service.like_list(db, current_user.id)
 
 
-@router.post("/like", response_model=LikeActionResponse)
-def like_cocktail():
-    return service.like()
+@router.post("/cocktails/{cocktail_id}/like", response_model=LikeActionResponse)
+def like_cocktail(
+    cocktail_id: int,
+    current_user: CurrentUser,
+    db: Session = Depends(get_db),
+):
+    return service.like(db, current_user.id, cocktail_id)
 
 
-@router.delete("/unlike", response_model=LikeActionResponse)
-def unlike_cocktail():
-    return service.unlike()
+@router.delete("/cocktails/{cocktail_id}/like", response_model=LikeActionResponse)
+def unlike_cocktail(
+    cocktail_id: int,
+    current_user: CurrentUser,
+    db: Session = Depends(get_db),
+):
+    return service.unlike(db, current_user.id, cocktail_id)

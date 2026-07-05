@@ -17,6 +17,7 @@ from app.cocktail.schemas import (
 )
 from app.cocktail.service import CocktailService
 
+from app.auth.dependencies import OptionalUser
 from app.core.database import get_db
 
 router = APIRouter(tags=["cocktail"])
@@ -45,12 +46,14 @@ def get_base_tags(db: Session = Depends(get_db)):
 
 @router.get("/list", response_model=CocktailListResponse)
 def cocktail_list(
+    current_user: OptionalUser,
     page: int = Query(1, ge=1),
     rpp: int = Query(10, ge=1, le=50),
     base: str | None = None,
     db: Session = Depends(get_db),
 ):
-    return service.list_cocktails(db, page, rpp, base)
+    user_id = current_user.id if current_user is not None else None
+    return service.list_cocktails(db, page, rpp, base, user_id)
 
 
 @router.get("/explore/{id}", response_model=CocktailExplore)
