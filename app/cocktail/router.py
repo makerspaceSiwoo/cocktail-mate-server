@@ -19,8 +19,6 @@ from app.cocktail.service import CocktailService
 from app.core.database import get_db
 from app.cocktail.schemas import CocktailDetailResponse
 
-from app.core.database import get_db
-
 router = APIRouter(tags=["cocktail"])
 service = CocktailService()
 
