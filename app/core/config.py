@@ -53,16 +53,10 @@ class Settings(BaseSettings):
 
     # ---- Mail ----
     # 발송 백엔드는 send_verification_email 에서 아래 우선순위로 선택된다:
-    #   1) SMTP (SMTP_HOST/USER/PASSWORD 모두 설정) — Gmail SMTP 등
-    #   2) Resend HTTP API (MAIL_API_KEY 설정, SDK 없이 httpx)
-    #   3) 콘솔 백엔드 (아무것도 미설정) — 매직 링크를 서버 로그로만 출력
+    #   1) Resend HTTP API (MAIL_API_KEY 설정, SDK 없이 httpx)
+    #   2) 콘솔 백엔드 (미설정) — 매직 링크를 서버 로그로만 출력
     mail_api_key: str = ""
     mail_from: str = "no-reply@cocktail-mate.local"
-    # Gmail SMTP: smtp.gmail.com:587 (STARTTLS). 2단계 인증 후 앱 비밀번호를 SMTP_PASSWORD 에.
-    smtp_host: str = ""
-    smtp_port: int = 587
-    smtp_user: str = ""
-    smtp_password: str = ""
 
     # ---- 소셜 로그인 (카카오; provider 추가는 KakaoProvider 참고) ----
     kakao_client_id: str = ""
