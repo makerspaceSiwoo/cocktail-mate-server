@@ -2,13 +2,18 @@
 
 - 이메일 매직링크 가입: request-verification → verification-status(폴링) → verify → signup
 - 로그인/refresh/logout/me
-- 소셜 로그인(카카오 등)은 나중에 확장 (providers/ 와 service.social_login() 은 보존).
+- 카카오 소셜 로그인 (provider 확장 가능: /auth/{provider}/... )
 
 rate limiting 은 slowapi 데코레이터로 지정 (IP 기준 + 일부 엔드포인트는 이메일 기준 병행).
 """
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, Request, Response
+import logging
+import secrets
+
+import httpx
+from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
+from fastapi.responses import RedirectResponse
 from slowapi.util import get_remote_address
 from sqlalchemy.orm import Session
 
@@ -18,6 +23,7 @@ from app.auth.cookies import (
     set_auth_cookies,
 )
 from app.auth.dependencies import CurrentUser
+from app.auth.providers import EmailConsentRequired, SocialAuthError, get_provider
 from app.auth.schemas import (
     LoginRequest,
     MessageResponse,
@@ -33,11 +39,17 @@ from app.auth.schemas import (
     VerifyEmailResponse,
 )
 from app.auth.service import AuthService
+from app.core.config import get_settings
 from app.core.database import get_db
 from app.core.rate_limit import limiter
 
+logger = logging.getLogger("app.auth.router")
+
 router = APIRouter(prefix="/auth", tags=["auth"])
 service = AuthService()
+
+# 카카오 콜백 CSRF 방어용 임시 state 쿠키.
+_STATE_COOKIE = "oauth_state"
 
 
 def _email_from_json_key(request: Request) -> str:
@@ -222,7 +234,89 @@ def password_change(
     return MessageResponse(message="비밀번호가 변경되었습니다.")
 
 
-# ── 소셜 로그인 (카카오 등) ──────────────────────────────────
-# 소셜 로그인(카카오 등)은 나중에 확장. providers/ 패키지와 service.social_login() 은
-# 그대로 두었고, 이 두 라우트(/{provider}/login, /{provider}/callback)만 다시 추가하면
-# 활성화됨.
+# ── 소셜 로그인 (provider 일반화; 현재 kakao 만 등록) ────────
+@router.get("/{provider}/login")
+def social_login_redirect(provider: str, response: Response):
+    social = get_provider(provider)
+    if social is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="지원하지 않는 소셜 로그인입니다.",
+        )
+    state = secrets.token_urlsafe(32)
+    settings = get_settings()
+    redirect = RedirectResponse(
+        url=social.authorize_url(state),
+        status_code=status.HTTP_302_FOUND,
+    )
+    # CSRF 방어: state 를 임시 HttpOnly 쿠키에 저장해 콜백에서 대조.
+    redirect.set_cookie(
+        _STATE_COOKIE,
+        state,
+        httponly=True,
+        secure=settings.cookie_secure,
+        samesite=settings.cookie_samesite,
+        max_age=600,
+        path=f"/auth/{provider}/callback",
+    )
+    return redirect
+
+
+@router.get("/{provider}/callback")
+async def social_login_callback(
+    provider: str,
+    request: Request,
+    code: str | None = None,
+    state: str | None = None,
+    db: Session = Depends(get_db),
+):
+    social = get_provider(provider)
+    if social is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="지원하지 않는 소셜 로그인입니다.",
+        )
+
+    # state 검증 (CSRF).
+    cookie_state = request.cookies.get(_STATE_COOKIE)
+    if not state or not cookie_state or not secrets.compare_digest(state, cookie_state):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="유효하지 않은 요청입니다. (state 불일치)",
+        )
+    if not code:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="인가 코드가 없습니다.",
+        )
+
+    settings = get_settings()
+    async with httpx.AsyncClient() as client:
+        try:
+            access_token = await social.exchange_code(code, client)
+            profile = await social.fetch_profile(access_token, client)
+        except EmailConsentRequired as exc:
+            # 이메일 미동의 → 가입 거부 + 연결 해제.
+            try:
+                await social.unlink(exc.access_token, client)
+            except Exception:  # noqa: BLE001 - unlink 실패는 로깅만
+                logger.exception("소셜 unlink 실패 provider=%s", provider)
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="이메일 제공 동의가 필요합니다.",
+            ) from None
+        except SocialAuthError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)
+            ) from None
+
+    user, jwt_access, jwt_refresh = service.social_login(db, profile)
+
+    redirect = RedirectResponse(
+        url=settings.frontend_url, status_code=status.HTTP_302_FOUND
+    )
+    # 카카오 콜백은 top-level GET 리다이렉트라 Origin 헤더가 없다 →
+    # resolve_cookie_flags 가 정적 fallback(settings) 을 쓴다. request 를 넘겨도 무방.
+    set_auth_cookies(redirect, jwt_access, jwt_refresh, request)
+    redirect.delete_cookie(_STATE_COOKIE, path=f"/auth/{provider}/callback")
+    return redirect
