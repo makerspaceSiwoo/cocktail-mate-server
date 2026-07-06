@@ -47,6 +47,32 @@ class DrinkOfTheDay(BaseModel):
     ABV: float
 
 
+class CocktailIngredientDetail(BaseModel):
+    id: int
+    name: str
+    nameEn: str | None = None
+    category: str | None = None
+    amount: float | None = None
+    unit: str | None = None
+    description: str | None = None
+    abv: float | None = None
+    imageUrl: str | None = None
+    potency: float | None = None
+
+
+class CocktailDetailResponse(BaseModel):
+    id: int
+    name: str
+    nameEn: str | None = None
+    imageUrl: str | None = None
+    glass: str | None = None
+    abv: float | None = None
+    recipe: list[str] | None = None
+    description: str | None = None
+    baseTag: str | None = None
+    ingredients: list[CocktailIngredientDetail]
+
+    
 class CocktailListItem(BaseModel):
     id: int
     name: str
