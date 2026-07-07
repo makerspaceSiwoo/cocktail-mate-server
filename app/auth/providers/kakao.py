@@ -4,10 +4,9 @@
 - 토큰:   https://kauth.kakao.com/oauth/token
 - 유저:   https://kapi.kakao.com/v2/user/me
 
-provider_id = 응답 `id`(숫자 → str). 닉네임만 받는다 (프로필사진·이메일 scope 미사용).
-이메일 동의항목(account_email)은 비즈앱 심사가 필요하므로 요청하지 않는다 —
-프로필에 이메일이 있으면 저장하되, 없으면 NULL 로 가입한다.
-닉네임은 콘솔에서 '선택 동의'로 두어 유저가 거부하면 서버가 기본 닉네임을 부여한다.
+provider_id = 응답 `id`(숫자 → str)만 사용한다. 동의항목(닉네임/프로필사진/이메일)은
+요청하지 않는다 — 카카오 프로필 정보를 저장하지 않고, 닉네임은 서버가 기본값을 부여한다.
+(카카오 닉네임이 실명일 수 있어 받지 않는다. 콘솔의 닉네임 동의항목은 '사용 안 함' 권장.)
 """
 
 from __future__ import annotations
@@ -34,8 +33,7 @@ class KakaoProvider(SocialProvider):
                 "redirect_uri": settings.kakao_redirect_uri,
                 "response_type": "code",
                 "state": state,
-                # 닉네임만 요청 (프로필사진·이메일 미요청 → 동의항목 최소, 개인 앱으로 바로 동작).
-                "scope": "profile_nickname",
+                # 동의항목 미요청 — 유저 식별자(id)만 받는다. 닉네임은 서버 기본값 사용.
             }
         )
         return f"{AUTHORIZE_URL}?{params}"
@@ -80,16 +78,6 @@ class KakaoProvider(SocialProvider):
         if not provider_id:
             raise SocialAuthError("카카오 유저 id 를 받지 못했습니다.")
 
-        account = body.get("kakao_account") or {}
-        profile = account.get("profile") or {}
-        nickname = profile.get("nickname")
-        # 프로필사진·이메일은 scope 미요청 → 받지 않는다(profile_image_url/email = NULL).
-        # 단, 카카오가 값을 실어 보내면 이메일만 그대로 저장(닉네임 없으면 service 가 기본값 부여).
-        email = account.get("email")
-
-        return SocialProfile(
-            provider=self.name,
-            provider_id=provider_id,
-            email=email,
-            nickname=nickname,
-        )
+        # 동의항목을 요청하지 않으므로 카카오 프로필(닉네임/사진/이메일)은 저장하지 않는다.
+        # 유저 식별자(provider_id)만 사용하고, 닉네임은 service 가 기본값을 부여한다.
+        return SocialProfile(provider=self.name, provider_id=provider_id)
