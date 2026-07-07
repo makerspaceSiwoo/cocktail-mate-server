@@ -1,14 +1,12 @@
 """동적 쿠키 플래그(Origin 분기) + CSRF Origin allowlist 미들웨어 테스트."""
 from __future__ import annotations
 
-import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from app.auth.cookies import resolve_cookie_flags
 from app.core.config import Settings
 from app.core.csrf import CSRFOriginMiddleware
-from tests.test_auth_email import _create_local_user
 
 
 def _set_cookie_for(resp, name: str) -> str:
@@ -19,54 +17,28 @@ def _set_cookie_for(resp, name: str) -> str:
     raise AssertionError(f"{name} Set-Cookie 없음: {resp.headers.get_list('set-cookie')}")
 
 
-# ── Change 1: 동적 쿠키 플래그 ──────────────────────────────
-def test_localhost_origin_cookie_lax_no_secure(client, db):
+# ── Change 1: 동적 쿠키 플래그 (카카오 콜백 GET 흐름으로 검증) ──
+def test_localhost_origin_cookie_lax_no_secure(kakao_callback):
     """localhost Origin → SameSite=lax, Secure 없음."""
-    _create_local_user(db)
-    resp = client.post(
-        "/auth/login",
-        json={"email": "login@example.com", "password": "abcd1234!"},
-        headers={"Origin": "http://localhost:3000"},
-    )
-    assert resp.status_code == 200, resp.text
+    resp = kakao_callback(provider_id="cookie1", origin="http://localhost:3000")
+    assert resp.status_code == 302, resp.text
     access = _set_cookie_for(resp, "access_token")
     assert "SameSite=lax" in access, access
     assert "Secure" not in access, access
 
 
-def test_deployed_origin_cookie_none_secure(client, db):
-    """배포(non-localhost https) Origin → SameSite=None; Secure."""
-    # 배포 origin 이 CSRF allowlist 를 통과하도록 실행 중 미들웨어 allowlist 에 주입.
-    # (미들웨어는 app 생성 시점 settings 를 캡처하고, 테스트 앱은 local 설정으로 빌드됨.)
-    from app.main import app as main_app
+def test_deployed_origin_cookie_none_secure(kakao_callback):
+    """배포(non-localhost https) Origin → SameSite=None; Secure.
 
-    _inject_allowed_origin(main_app, "https://cocktail-mate.vercel.app")
-
-    _create_local_user(db)
-    resp = client.post(
-        "/auth/login",
-        json={"email": "login@example.com", "password": "abcd1234!"},
-        headers={"Origin": "https://cocktail-mate.vercel.app"},
+    콜백은 GET(safe method)이라 CSRF Origin allowlist 대상이 아니므로 그대로 통과한다.
+    """
+    resp = kakao_callback(
+        provider_id="cookie2", origin="https://cocktail-mate.vercel.app"
     )
-    assert resp.status_code == 200, resp.text
+    assert resp.status_code == 302, resp.text
     access = _set_cookie_for(resp, "access_token")
     assert "samesite=none" in access.lower(), access
     assert "Secure" in access, access
-
-
-def _inject_allowed_origin(app: FastAPI, origin: str) -> None:
-    """실행 중 앱의 CSRF 미들웨어 인스턴스 allowlist 에 origin 을 추가한다.
-
-    미들웨어는 __init__ 에서 allowlist 를 확정하므로, 이미 빌드된 스택의
-    인스턴스를 찾아 _allowed 에 넣는다. TestClient(app) 진입 시 스택이 빌드된다.
-    """
-    stack = getattr(app, "middleware_stack", None)
-    target = stack
-    while target is not None:
-        if isinstance(target, CSRFOriginMiddleware):
-            target._allowed.add(origin)
-            return
-        target = getattr(target, "app", None)
 
 
 def test_no_origin_falls_back_to_static(monkeypatch):

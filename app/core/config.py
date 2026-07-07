@@ -16,7 +16,7 @@ class Settings(BaseSettings):
 
     # ---- App ----
     app_env: str = "local"
-    # 애플리케이션 로그 레벨. 콘솔 메일 백엔드(매직 링크 로그 출력)는 INFO 이상이어야 보인다.
+    # 애플리케이션 로그 레벨 (app.* 로거).
     log_level: str = "info"
 
     # ---- Database ----
@@ -44,24 +44,20 @@ class Settings(BaseSettings):
     secret_key: str = "dev-insecure-secret-change-me"  # noqa: S105
     access_token_expire_minutes: int = 30
     refresh_token_expire_days: int = 14
-    email_verify_expire_hours: int = 24
-    # 비밀번호 재설정 JWT 만료(분). 토큰은 DB 저장 없이 secret_key+password_hash 로 서명.
-    reset_token_expire_minutes: int = 30
 
-    # 매직 링크가 여는 프론트 주소 (verify-email 페이지 및 소셜 콜백 후 리다이렉트 대상)
+    # 소셜 로그인 콜백 성공 후 리다이렉트할 프론트 주소.
     frontend_url: str = "http://localhost:3000"
-
-    # ---- Mail ----
-    # 발송 백엔드는 send_verification_email 에서 아래 우선순위로 선택된다:
-    #   1) Resend HTTP API (MAIL_API_KEY 설정, SDK 없이 httpx)
-    #   2) 콘솔 백엔드 (미설정) — 매직 링크를 서버 로그로만 출력
-    mail_api_key: str = ""
-    mail_from: str = "no-reply@cocktail-mate.local"
 
     # ---- 소셜 로그인 (카카오; provider 추가는 KakaoProvider 참고) ----
     kakao_client_id: str = ""
     kakao_client_secret: str = ""
     kakao_redirect_uri: str = "http://localhost:8000/auth/kakao/callback"
+
+    # ---- 소셜 로그인 (구글; 확장용 placeholder — providers/google.py 참고) ----
+    # 값을 채우고 providers/__init__.py 레지스트리에 GoogleProvider 를 등록하면 활성화된다.
+    google_client_id: str = ""
+    google_client_secret: str = ""
+    google_redirect_uri: str = "http://localhost:8000/auth/google/callback"
 
     # ---- 쿠키 ----
     # 쿠키 flag(secure/samesite)는 요청 Origin 기준으로 동적 결정된다

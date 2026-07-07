@@ -11,7 +11,6 @@ from slowapi.errors import RateLimitExceeded
 from slowapi.middleware import SlowAPIMiddleware
 from sqlalchemy import text
 
-from app import cocktail
 from app.auth.router import router as auth_router
 from app.cocktail.router import router as cocktail_router
 from app.core.config import get_settings
@@ -30,9 +29,9 @@ from app.core.database import SessionLocal
 def _configure_logging(level_name: str) -> None:
     """`app.*` 로거를 stderr로 출력하도록 설정한다.
 
-    uvicorn 기본 로깅은 앱 로거(app.auth.mail 등)에 핸들러를 붙이지 않아 INFO 로그가
-    묻힌다. 콘솔 메일 백엔드가 매직 링크를 로그로 내보내므로, `app` 로거에 핸들러+레벨을
-    직접 지정한다. uvicorn dictConfig(disable_existing_loggers=False) 이후에 호출돼도 유지된다.
+    uvicorn 기본 로깅은 앱 로거에 핸들러를 붙이지 않아 INFO 로그가 묻힌다. `app` 로거에
+    핸들러+레벨을 직접 지정한다. uvicorn dictConfig(disable_existing_loggers=False)
+    이후에 호출돼도 유지된다.
     """
     level = getattr(logging, level_name.upper(), logging.INFO)
     app_logger = logging.getLogger("app")
@@ -112,7 +111,6 @@ def create_app() -> FastAPI:
         """
         from cocktail_mate_db.models import User
 
-        from app.core.database import SessionLocal
 
         with SessionLocal() as db:
             users = db.query(User).order_by(User.id).all()
@@ -138,7 +136,6 @@ def create_app() -> FastAPI:
 
         cocktails 테이블에서 id 기준 상위 10개의 id/name만 반환한다.
         """
-        from cocktail_mate_db.models.cocktail import Cocktail
 
         from app.core.database import SessionLocal
 

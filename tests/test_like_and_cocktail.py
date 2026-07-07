@@ -2,22 +2,13 @@
 from __future__ import annotations
 
 from cocktail_mate_db.models import User
-from app.core.security import hash_password
 
 
-def _login(client, db, email="liker@example.com"):
-    user = User(
-        email=email,
-        password_hash=hash_password("abcd1234!"),
-        nickname=email.split("@")[0],
-        provider="local",
-        is_active=True,
-    )
-    db.add(user)
-    db.commit()
-    db.refresh(user)
-    client.post("/auth/login", json={"email": email, "password": "abcd1234!"})
-    return user
+def _login(kakao_callback, db, provider_id="liker1", nickname="liker"):
+    """카카오 소셜 로그인으로 인증 세션을 만들고 유저를 반환한다."""
+    resp = kakao_callback(provider_id=provider_id, nickname=nickname)
+    assert resp.status_code == 302, resp.text
+    return db.query(User).filter_by(provider="kakao", provider_id=provider_id).one()
 
 
 def test_like_requires_auth(client, seed_cocktail):
@@ -26,9 +17,9 @@ def test_like_requires_auth(client, seed_cocktail):
     assert client.get("/like/list").status_code == 401
 
 
-def test_like_and_unlike_flow(client, db, seed_cocktail):
+def test_like_and_unlike_flow(client, db, seed_cocktail, kakao_callback):
     cid = seed_cocktail()
-    _login(client, db)
+    _login(kakao_callback, db)
 
     # 좋아요
     resp = client.post(f"/cocktails/{cid}/like")
@@ -53,12 +44,12 @@ def test_like_and_unlike_flow(client, db, seed_cocktail):
     assert client.get("/like/list").json()["cocktails"] == []
 
 
-def test_like_nonexistent_cocktail_404(client, db):
-    _login(client, db)
+def test_like_nonexistent_cocktail_404(client, db, kakao_callback):
+    _login(kakao_callback, db)
     assert client.post("/cocktails/999999/like").status_code == 404
 
 
-def test_cocktail_list_is_liked_optional_user(client, db, seed_cocktail):
+def test_cocktail_list_is_liked_optional_user(client, db, seed_cocktail, kakao_callback):
     cid = seed_cocktail()
 
     # 비로그인: is_liked 항상 False, 200
@@ -69,7 +60,7 @@ def test_cocktail_list_is_liked_optional_user(client, db, seed_cocktail):
     assert all(i["isLiked"] is False for i in items)
 
     # 로그인 + 좋아요 후: 해당 항목 is_liked True
-    _login(client, db)
+    _login(kakao_callback, db)
     client.post(f"/cocktails/{cid}/like")
     logged = client.get("/list")
     target = next(i for i in logged.json()["items"] if i["id"] == cid)

@@ -5,12 +5,13 @@
 """
 from __future__ import annotations
 
-from .base import EmailConsentRequired, SocialAuthError, SocialProfile, SocialProvider
+from .base import SocialAuthError, SocialProfile, SocialProvider
 from .kakao import KakaoProvider
 
 _PROVIDERS: dict[str, SocialProvider] = {
     "kakao": KakaoProvider(),
-    # "google": GoogleProvider(),  # 확장 예시 — 클래스 + config env 추가만으로 활성화
+    # 구글 확장: providers/google.py 의 GoogleProvider + config 의 google_* env 를 채운 뒤 아래 주석 해제.
+    # "google": GoogleProvider(),
 }
 
 
@@ -20,7 +21,6 @@ def get_provider(name: str) -> SocialProvider | None:
 
 
 __all__ = [
-    "EmailConsentRequired",
     "SocialAuthError",
     "SocialProfile",
     "SocialProvider",

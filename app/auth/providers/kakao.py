@@ -3,10 +3,10 @@
 - 인가:   https://kauth.kakao.com/oauth/authorize
 - 토큰:   https://kauth.kakao.com/oauth/token
 - 유저:   https://kapi.kakao.com/v2/user/me
-- 해제:   https://kapi.kakao.com/v1/user/unlink
 
-provider_id = 응답 `id`(숫자 → str), 이메일 = `kakao_account.email`.
-이메일 미동의(제공 거부) 시 EmailConsentRequired 를 던진다 (라우터가 unlink 처리).
+provider_id = 응답 `id`(숫자 → str). 닉네임/프로필사진만 받는다 (이메일 scope 미사용).
+이메일 동의항목(account_email)은 비즈앱 심사가 필요하므로 요청하지 않는다 —
+프로필에 이메일이 있으면 저장하되, 없으면 NULL 로 가입한다.
 """
 from __future__ import annotations
 
@@ -14,12 +14,11 @@ import httpx
 
 from app.core.config import get_settings
 
-from .base import EmailConsentRequired, SocialAuthError, SocialProfile, SocialProvider
+from .base import SocialAuthError, SocialProfile, SocialProvider
 
 AUTHORIZE_URL = "https://kauth.kakao.com/oauth/authorize"
 TOKEN_URL = "https://kauth.kakao.com/oauth/token"
 PROFILE_URL = "https://kapi.kakao.com/v2/user/me"
-UNLINK_URL = "https://kapi.kakao.com/v1/user/unlink"
 
 
 class KakaoProvider(SocialProvider):
@@ -33,8 +32,8 @@ class KakaoProvider(SocialProvider):
                 "redirect_uri": settings.kakao_redirect_uri,
                 "response_type": "code",
                 "state": state,
-                # 이메일은 서비스 필수 → 동의 항목으로 요청.
-                "scope": "account_email",
+                # 닉네임·프로필사진만 요청 (이메일 미요청 → 개인 앱으로 바로 동작).
+                "scope": "profile_nickname profile_image",
             }
         )
         return f"{AUTHORIZE_URL}?{params}"
@@ -80,14 +79,11 @@ class KakaoProvider(SocialProvider):
             raise SocialAuthError("카카오 유저 id 를 받지 못했습니다.")
 
         account = body.get("kakao_account") or {}
-        email = account.get("email")
-        # 이메일 동의 안 함 / 미검증 → 가입 거부 대상.
-        if not email or account.get("email_needs_agreement") is True:
-            raise EmailConsentRequired(access_token)
-
         profile = account.get("profile") or {}
         nickname = profile.get("nickname")
         image_url = profile.get("profile_image_url")
+        # 이메일은 scope 를 요청하지 않으므로 보통 없음. 있으면 저장, 없으면 NULL.
+        email = account.get("email")
 
         return SocialProfile(
             provider=self.name,
@@ -95,11 +91,4 @@ class KakaoProvider(SocialProvider):
             email=email,
             nickname=nickname,
             profile_image_url=image_url,
-        )
-
-    async def unlink(self, access_token: str, client: httpx.AsyncClient) -> None:
-        await client.post(
-            UNLINK_URL,
-            headers={"Authorization": f"Bearer {access_token}"},
-            timeout=10.0,
         )

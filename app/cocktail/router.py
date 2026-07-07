@@ -9,7 +9,6 @@ from sqlalchemy.orm import Session
 from app.cocktail.schemas import (
     CocktailBrief,
     CocktailExplore,
-    CocktailSummary,
     DrinkOfTheDay,
     SearchResult,
     CocktailListResponse,

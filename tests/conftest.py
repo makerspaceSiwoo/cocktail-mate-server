@@ -49,7 +49,7 @@ def _clean_tables():
     """각 테스트 전에 데이터 정리 (스키마는 유지)."""
     with test_engine.begin() as conn:
         conn.exec_driver_sql(
-            "TRUNCATE TABLE likes, refresh_tokens, email_verifications, "
+            "TRUNCATE TABLE likes, refresh_tokens, "
             "cocktail_ingredients, cocktails, ingredients, users "
             "RESTART IDENTITY CASCADE"
         )
@@ -107,6 +107,56 @@ def client_rl():
         yield c
     app.dependency_overrides.clear()
     app.state.limiter.enabled = False
+
+
+@pytest.fixture
+def kakao_callback(client, monkeypatch):
+    """카카오 콜백을 mock provider 로 수행하는 헬퍼.
+
+    provider 의 exchange_code/fetch_profile 를 monkeypatch 로 대체해 실제 카카오 호출 없이
+    라우터+service upsert 를 태운다. profile 필드/Origin 헤더를 지정해 다양한 시나리오를 만든다.
+    콜백 응답(302 리다이렉트, Set-Cookie 포함)을 반환한다.
+    """
+    from app.auth.providers import SocialProfile
+    from app.auth.providers.kakao import KakaoProvider
+
+    def _run(
+        *,
+        provider_id: str = "12345",
+        nickname: str | None = "카카오유저",
+        email: str | None = None,
+        profile_image_url: str | None = None,
+        origin: str | None = None,
+    ):
+        resp = client.get("/auth/kakao/login", follow_redirects=False)
+        assert resp.status_code == 302
+        state = client.cookies.get("oauth_state")
+        assert state
+
+        async def _exchange(self, code, http):
+            return "kakao-access-token"
+
+        async def _profile(self, token, http):
+            return SocialProfile(
+                provider="kakao",
+                provider_id=provider_id,
+                email=email,
+                nickname=nickname,
+                profile_image_url=profile_image_url,
+            )
+
+        monkeypatch.setattr(KakaoProvider, "exchange_code", _exchange)
+        monkeypatch.setattr(KakaoProvider, "fetch_profile", _profile)
+
+        headers = {"Origin": origin} if origin else {}
+        return client.get(
+            "/auth/kakao/callback",
+            params={"code": "authcode", "state": state},
+            headers=headers,
+            follow_redirects=False,
+        )
+
+    return _run
 
 
 @pytest.fixture
