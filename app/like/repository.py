@@ -2,6 +2,7 @@
 
 세션은 호출부(service)가 주입한다.
 """
+
 from __future__ import annotations
 
 from sqlalchemy import func, select
@@ -13,9 +14,7 @@ from cocktail_mate_db.models import Cocktail, Like
 class LikeRepository:
     def get_like(self, db: Session, user_id: int, cocktail_id: int) -> Like | None:
         return db.execute(
-            select(Like).where(
-                Like.user_id == user_id, Like.cocktail_id == cocktail_id
-            )
+            select(Like).where(Like.user_id == user_id, Like.cocktail_id == cocktail_id)
         ).scalar_one_or_none()
 
     def add_like(self, db: Session, user_id: int, cocktail_id: int) -> Like:
@@ -29,13 +28,11 @@ class LikeRepository:
         db.flush()
 
     def count_likes(self, db: Session, cocktail_id: int) -> int:
-        return (
-            db.execute(
-                select(func.count())
-                .select_from(Like)
-                .where(Like.cocktail_id == cocktail_id)
-            ).scalar_one()
-        )
+        return db.execute(
+            select(func.count())
+            .select_from(Like)
+            .where(Like.cocktail_id == cocktail_id)
+        ).scalar_one()
 
     def cocktail_exists(self, db: Session, cocktail_id: int) -> bool:
         return (
@@ -56,14 +53,10 @@ class LikeRepository:
 
     def liked_cocktail_ids(self, db: Session, user_id: int) -> set[int]:
         """유저가 좋아요한 cocktail_id 집합 (is_liked 매핑용)."""
-        rows = db.execute(
-            select(Like.cocktail_id).where(Like.user_id == user_id)
-        ).all()
+        rows = db.execute(select(Like.cocktail_id).where(Like.user_id == user_id)).all()
         return {row[0] for row in rows}
 
-    def like_counts_for(
-        self, db: Session, cocktail_ids: list[int]
-    ) -> dict[int, int]:
+    def like_counts_for(self, db: Session, cocktail_ids: list[int]) -> dict[int, int]:
         """여러 칵테일의 좋아요 수를 한 번에 조회."""
         if not cocktail_ids:
             return {}

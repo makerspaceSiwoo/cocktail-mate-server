@@ -2,6 +2,7 @@
 
 경로/응답은 기존 단일 파일 구현과 동일하게 유지한다 (prefix 없음).
 """
+
 from fastapi import APIRouter, Depends, Query
 
 from sqlalchemy.orm import Session

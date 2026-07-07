@@ -2,6 +2,7 @@
 
 프론트엔드 호환을 위해 필드명은 기존 mock 응답과 동일한 camelCase를 사용한다.
 """
+
 from pydantic import BaseModel
 
 

@@ -33,7 +33,7 @@ class CocktailService:
             else None
         )
         return self.repository.list_all(db, page, rpp, base, liked_ids)
-    
+
     def get_base_tags(self, db: Session) -> dict:
         return self.repository.get_base_tags(db)
 

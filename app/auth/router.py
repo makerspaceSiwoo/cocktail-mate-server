@@ -4,6 +4,7 @@
 - 소셜 로그인/가입: GET /auth/{provider}/login → provider 인가 → GET /auth/{provider}/callback
 - 세션: /auth/refresh(rotation), /auth/logout, /auth/me
 """
+
 from __future__ import annotations
 
 import secrets

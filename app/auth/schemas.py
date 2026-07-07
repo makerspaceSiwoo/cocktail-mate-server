@@ -2,6 +2,7 @@
 
 소셜 로그인 전용 — 이메일/비밀번호 입력 스키마는 없다.
 """
+
 from __future__ import annotations
 
 from pydantic import BaseModel

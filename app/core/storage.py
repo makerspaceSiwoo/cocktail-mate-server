@@ -3,6 +3,7 @@
 로컬 개발에서는 MinIO, 프로덕션에서는 Oracle Object Storage(S3 호환 엔드포인트)를
 같은 boto3 코드로 사용한다. 엔드포인트/키만 `.env`로 교체한다.
 """
+
 from functools import lru_cache
 from typing import BinaryIO
 
@@ -30,7 +31,9 @@ def upload_fileobj(fileobj: BinaryIO, key: str, content_type: str | None = None)
     """파일 객체를 버킷에 업로드하고 공개 URL을 반환한다."""
     settings = get_settings()
     extra = {"ContentType": content_type} if content_type else {}
-    get_s3_client().upload_fileobj(fileobj, settings.storage_bucket, key, ExtraArgs=extra)
+    get_s3_client().upload_fileobj(
+        fileobj, settings.storage_bucket, key, ExtraArgs=extra
+    )
     return f"{settings.storage_public_base_url.rstrip('/')}/{key}"
 
 

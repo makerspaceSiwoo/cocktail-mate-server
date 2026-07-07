@@ -3,6 +3,7 @@
 새 provider 추가: 클래스 구현 후 아래 `_PROVIDERS` 에 인스턴스 한 줄만 등록하면
 라우트(/auth/{provider}/...)가 자동으로 인식한다.
 """
+
 from __future__ import annotations
 
 from .base import SocialAuthError, SocialProfile, SocialProvider

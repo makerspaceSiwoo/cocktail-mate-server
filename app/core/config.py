@@ -2,6 +2,7 @@
 
 모든 비밀값/환경값은 `.env`에서 주입한다 (커밋 금지). 예시는 `.env.example` 참고.
 """
+
 from functools import lru_cache
 
 from pydantic_settings import BaseSettings, SettingsConfigDict

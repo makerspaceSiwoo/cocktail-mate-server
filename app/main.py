@@ -3,6 +3,7 @@
 도메인 라우터(cocktail/user/like)를 등록하고, 배포 검증용 /health를 제공한다.
 기존 엔드포인트 경로/응답은 도메인 패키지로 이동했을 뿐 그대로 유지된다.
 """
+
 import logging
 
 from fastapi import FastAPI
@@ -111,7 +112,6 @@ def create_app() -> FastAPI:
         """
         from cocktail_mate_db.models import User
 
-
         with SessionLocal() as db:
             users = db.query(User).order_by(User.id).all()
             return {
@@ -122,12 +122,13 @@ def create_app() -> FastAPI:
                         "email": u.email,
                         "nickname": u.nickname,
                         "is_active": u.is_active,
-                        "created_at": u.created_at.isoformat() if u.created_at else None,
+                        "created_at": u.created_at.isoformat()
+                        if u.created_at
+                        else None,
                     }
                     for u in users
                 ],
             }
-    
 
     # ── 임시 진단용 (db-test): cocktails 테이블 상위 10개 조회 확인 ──
     @app.get("/db-test", tags=["infra"])
@@ -153,5 +154,6 @@ def create_app() -> FastAPI:
             }
 
     return app
+
 
 app = create_app()

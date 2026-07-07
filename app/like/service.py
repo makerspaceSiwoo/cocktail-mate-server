@@ -1,4 +1,5 @@
 """좋아요 비즈니스 로직 — 실제 DB(likes) 기반 등록/해제/목록."""
+
 from __future__ import annotations
 
 from fastapi import HTTPException, status

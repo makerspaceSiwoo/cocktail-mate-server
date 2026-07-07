@@ -8,6 +8,7 @@
 `SocialProfile` 은 provider 별 응답을 서버 공통 표현으로 정규화한 값이다.
 이메일은 provider 가 제공하지 않을 수 있어 nullable 이다 (이메일 없이도 가입 허용).
 """
+
 from __future__ import annotations
 
 from abc import ABC, abstractmethod

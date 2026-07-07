@@ -1,4 +1,4 @@
-.PHONY: up up-d down logs rebuild shell check test prod-up prod-down hooks ssh-check
+.PHONY: up up-d down logs rebuild shell check format format-check prod-up prod-down hooks ssh-check
 
 # 빌드 전 GitHub SSH 인증 점검 (cocktail-mate-db private 레포 설치 전제)
 ssh-check:
@@ -16,10 +16,6 @@ up-d: ssh-check
 down:
 	docker compose down
 
-# pytest 실행
-test:
-	docker compose exec api pytest
-
 # 로그 보기
 logs:
 	docker compose logs -f
@@ -31,6 +27,14 @@ shell:
 # 컴파일 체크
 check:
 	docker compose exec api python -m compileall app
+
+# 코드 포맷팅 (ruff — 로컬 venv/시스템 ruff 사용). 자동 정리.
+format:
+	ruff format . && ruff check --fix .
+
+# 포맷/린트 검사만 (수정 없음) — pre-push 훅과 동일 기준
+format-check:
+	ruff format --check . && ruff check .
 
 # 이미지 재빌드
 rebuild:
@@ -46,7 +50,7 @@ prod-down:
 	docker compose -f docker-compose.prod.yml down
 
 # --- Git hooks (최초 1회 실행) ---
-# 브랜치명 검증(pre-commit) + main push 차단·build 체크(pre-push) 활성화
+# 브랜치명 검증(pre-commit) + main push 차단·ruff 포맷/린트·build 체크(pre-push) 활성화
 hooks:
 	git config core.hooksPath .githooks
 	chmod +x .githooks/*

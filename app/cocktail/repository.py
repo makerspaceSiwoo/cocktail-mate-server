@@ -26,11 +26,7 @@ class CocktailRepository:
             query = query.filter(Cocktail.base_tag == base)
 
         cocktails = (
-            query
-            .order_by(Cocktail.id)
-            .offset((page - 1) * rpp)
-            .limit(rpp + 1)
-            .all()
+            query.order_by(Cocktail.id).offset((page - 1) * rpp).limit(rpp + 1).all()
         )
 
         has_next_page = len(cocktails) > rpp
@@ -58,7 +54,7 @@ class CocktailRepository:
                 "hasNextPage": has_next_page,
             },
         }
-    
+
     def get_base_tags(self, db: Session) -> dict:
         rows = (
             db.query(Cocktail.base_tag)
@@ -68,9 +64,7 @@ class CocktailRepository:
             .all()
         )
 
-        return {
-            "items": [row[0] for row in rows]
-        }
+        return {"items": [row[0] for row in rows]}
 
     def search(self, keyword: str) -> list[dict]:
         kw = keyword.lower()

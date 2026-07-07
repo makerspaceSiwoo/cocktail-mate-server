@@ -4,6 +4,7 @@
 - DELETE /cocktails/{id}/like   : 좋아요 해제 (로그인 필수)
 - GET    /like/list             : 내 좋아요 목록 (로그인 필수, 경로 유지)
 """
+
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 

@@ -11,6 +11,7 @@
 - 유저:   https://openidconnect.googleapis.com/v1/userinfo
 provider_id = 응답 `sub`. 닉네임 = `name`, 프로필사진 = `picture`, 이메일 = `email`.
 """
+
 from __future__ import annotations
 
 import httpx

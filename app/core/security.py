@@ -6,6 +6,7 @@
 
 소셜 로그인 전용이므로 비밀번호 해시/검증은 없다.
 """
+
 from __future__ import annotations
 
 import hashlib

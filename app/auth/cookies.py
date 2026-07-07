@@ -9,6 +9,7 @@
 브라우저가 쿠키를 실어 보내려면 SameSite=None; Secure 가 필요하고, 로컬 http 개발에서는
 Secure 를 붙일 수 없어 SameSite=Lax 로 떨어뜨려야 하기 때문.
 """
+
 from __future__ import annotations
 
 from urllib.parse import urlsplit

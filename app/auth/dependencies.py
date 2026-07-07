@@ -4,6 +4,7 @@ OAuth2PasswordBearer(Authorization 헤더)가 아니라 쿠키에서 읽는다.
 - get_current_user: 미인증/무효 시 401.
 - get_optional_user: 미인증/무효 시 None (비로그인 허용 엔드포인트용).
 """
+
 from __future__ import annotations
 
 from typing import Annotated

@@ -5,6 +5,7 @@
 - 이메일 기준 제한이 필요한 엔드포인트는 요청 본문에서 email 을 뽑아 key로 쓰는
   별도 데코레이터(`email_key_func` 조합)를 라우터에서 지정한다.
 """
+
 from __future__ import annotations
 
 from slowapi import Limiter

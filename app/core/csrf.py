@@ -17,6 +17,7 @@ unsafe 메서드(POST/PUT/PATCH/DELETE)에 대해 요청 Origin 을 CORS 허용 
 허용 목록 = CORS 가 허용하는 것과 동일:
   settings.cors_origin_list (production 등록 origin) + (production 이 아니면) localhost regex.
 """
+
 from __future__ import annotations
 
 import re

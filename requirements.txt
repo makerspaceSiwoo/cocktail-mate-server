@@ -1,6 +1,5 @@
 fastapi
 uvicorn[standard]
-pytest
 sqlalchemy
 psycopg2-binary
 pgvector
