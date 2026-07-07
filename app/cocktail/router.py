@@ -8,7 +8,6 @@ from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 
 from app.cocktail.schemas import (
-    CocktailBrief,
     CocktailExplore,
     DrinkOfTheDay,
     SearchResult,
@@ -16,9 +15,9 @@ from app.cocktail.schemas import (
     BaseTagListResponse,
 )
 from app.cocktail.service import CocktailService
-
 from app.auth.dependencies import OptionalUser
 from app.core.database import get_db
+from app.cocktail.schemas import CocktailDetailResponse
 
 router = APIRouter(tags=["cocktail"])
 service = CocktailService()
@@ -27,11 +26,6 @@ service = CocktailService()
 @router.get("/")
 def root():
     return {"message": "Hello World"}
-
-
-@router.get("/cocktail/{id}", response_model=CocktailBrief)
-def get_cocktail(id: int):
-    return service.get_brief(id)
 
 
 @router.get("/search", response_model=SearchResult)
@@ -64,3 +58,8 @@ def explore_cocktail(id: int):
 @router.get("/drink-of-the-day", response_model=DrinkOfTheDay)
 def drink_of_the_day():
     return service.drink_of_the_day()
+
+
+@router.get("/cocktail/{id}", response_model=CocktailDetailResponse)
+def get_cocktail_detail(id: int, db: Session = Depends(get_db)):
+    return service.get_detail(db, id)

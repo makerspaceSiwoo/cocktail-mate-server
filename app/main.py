@@ -23,7 +23,7 @@ from app.like.router import router as like_router
 
 from slowapi import _rate_limit_exceeded_handler
 
-from cocktail_mate_db.models.cocktail import Cocktail
+from cocktail_mate_db.models import Cocktail
 from app.core.database import SessionLocal
 
 

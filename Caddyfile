@@ -1,7 +1,9 @@
-# Caddy 리버스 프록시 — 도메인별 Let's Encrypt 인증서 자동 발급/갱신.
-# 두 도메인을 모두 서빙한다(둘 다 152.69.225.226로 resolve):
-#   - 152-69-225-226.nip.io     : IP 기반(가입 불필요)
-#   - cocktail-mate.duckdns.org : 외우기 쉬운 이름(DuckDNS, 무료) — docs 접근 등에 사용
+# Caddy 리버스 프록시.
+# 서빙 도메인(모두 152.69.225.226로 resolve):
+#   - 152-69-225-226.nip.io     : IP 기반(가입 불필요), Let's Encrypt 자동 발급
+#   - cocktail-mate.duckdns.org : 외우기 쉬운 이름(DuckDNS, 무료), Let's Encrypt 자동 발급
+#   - api.cocktail-mate.com     : Cloudflare 프록시 뒤 origin. CF Origin CA 인증서를 tls로 지정
+#                                 (프록시 때문에 LE 챌린지가 막혀 자동발급 불가 → docs/CLOUDFLARE.md)
 # 도메인을 추가/교체하려면 아래 사이트 주소 줄만 수정하면 된다.
 #
 # rate_limit: IP당 분당 100요청 초과 시 429 반환 (L7 플러딩/무차별 호출 1차 방어).
@@ -22,4 +24,18 @@
 		}
 	}
 	reverse_proxy api:8000
+}
+
+api.cocktail-mate.com {
+	# Cloudflare 프록시 뒤 origin. 실제 클라이언트 IP는 CF-Connecting-IP 헤더로 온다.
+	rate_limit {
+		zone cf_per_ip {
+			key {http.request.header.CF-Connecting-IP}
+			events 100
+			window 1m
+		}
+	}
+	reverse_proxy api:8000
+	# Cloudflare Origin CA 인증서(15년). CF SSL 모드 Full(strict)가 이 인증서를 신뢰한다.
+	tls /etc/caddy/certs/cf-origin.pem /etc/caddy/certs/cf-origin-key.pem
 }

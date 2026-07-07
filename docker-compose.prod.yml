@@ -20,6 +20,7 @@ services:
       - "443:443"        # HTTPS
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./caddy/certs:/etc/caddy/certs:ro   # Cloudflare Origin CA 인증서(gitignore된 *.pem, 서버에만 존재)
       - caddy_data:/data       # 발급된 인증서 영속화
       - caddy_config:/config
     depends_on:

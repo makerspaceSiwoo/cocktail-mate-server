@@ -8,6 +8,8 @@ from sqlalchemy.orm import Session
 from app.cocktail.repository import CocktailRepository
 from app.like.repository import LikeRepository
 
+from fastapi import HTTPException
+
 
 class CocktailService:
     def __init__(
@@ -73,3 +75,11 @@ class CocktailService:
             "description": "salty, sugary",
             "ABV": 21.3,
         }
+
+    def get_detail(self, db: Session, cocktail_id: int) -> dict:
+        cocktail = self.repository.find_detail_by_id(db, cocktail_id)
+
+        if cocktail is None:
+            raise HTTPException(status_code=404, detail="Cocktail not found")
+
+        return cocktail
