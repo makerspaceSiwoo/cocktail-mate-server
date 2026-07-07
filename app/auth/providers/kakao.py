@@ -4,9 +4,10 @@
 - 토큰:   https://kauth.kakao.com/oauth/token
 - 유저:   https://kapi.kakao.com/v2/user/me
 
-provider_id = 응답 `id`(숫자 → str). 닉네임/프로필사진만 받는다 (이메일 scope 미사용).
+provider_id = 응답 `id`(숫자 → str). 닉네임만 받는다 (프로필사진·이메일 scope 미사용).
 이메일 동의항목(account_email)은 비즈앱 심사가 필요하므로 요청하지 않는다 —
 프로필에 이메일이 있으면 저장하되, 없으면 NULL 로 가입한다.
+닉네임은 콘솔에서 '선택 동의'로 두어 유저가 거부하면 서버가 기본 닉네임을 부여한다.
 """
 
 from __future__ import annotations
@@ -33,8 +34,8 @@ class KakaoProvider(SocialProvider):
                 "redirect_uri": settings.kakao_redirect_uri,
                 "response_type": "code",
                 "state": state,
-                # 닉네임·프로필사진만 요청 (이메일 미요청 → 개인 앱으로 바로 동작).
-                "scope": "profile_nickname profile_image",
+                # 닉네임만 요청 (프로필사진·이메일 미요청 → 동의항목 최소, 개인 앱으로 바로 동작).
+                "scope": "profile_nickname",
             }
         )
         return f"{AUTHORIZE_URL}?{params}"
@@ -82,8 +83,8 @@ class KakaoProvider(SocialProvider):
         account = body.get("kakao_account") or {}
         profile = account.get("profile") or {}
         nickname = profile.get("nickname")
-        image_url = profile.get("profile_image_url")
-        # 이메일은 scope 를 요청하지 않으므로 보통 없음. 있으면 저장, 없으면 NULL.
+        # 프로필사진·이메일은 scope 미요청 → 받지 않는다(profile_image_url/email = NULL).
+        # 단, 카카오가 값을 실어 보내면 이메일만 그대로 저장(닉네임 없으면 service 가 기본값 부여).
         email = account.get("email")
 
         return SocialProfile(
@@ -91,5 +92,4 @@ class KakaoProvider(SocialProvider):
             provider_id=provider_id,
             email=email,
             nickname=nickname,
-            profile_image_url=image_url,
         )
