@@ -3,6 +3,10 @@
 from pydantic import BaseModel
 
 
+class LikeRequest(BaseModel):
+    cocktailId: int
+
+
 class LikedCocktail(BaseModel):
     cocktailId: int
     cocktailName: str
@@ -21,7 +25,3 @@ class LikeActionResponse(BaseModel):
     isLiked: bool
     likeCount: int
     message: str
-
-
-class LikeRequest(BaseModel):
-    cocktailId: int
