@@ -18,6 +18,7 @@ from app.cocktail.service import CocktailService
 from app.auth.dependencies import OptionalUser
 from app.core.database import get_db
 from app.cocktail.schemas import CocktailDetailResponse
+from app.like.schemas import LikeActionResponse, LikeListResponse, LikeRequest
 
 router = APIRouter(tags=["cocktail"])
 service = CocktailService()
@@ -63,3 +64,21 @@ def drink_of_the_day():
 @router.get("/cocktail/{id}", response_model=CocktailDetailResponse)
 def get_cocktail_detail(id: int, db: Session = Depends(get_db)):
     return service.get_detail(db, id)
+
+
+@router.post("/like", response_model=LikeActionResponse)
+def like_cocktail(
+    payload: LikeRequest,
+    current_user: CurrentUser,
+    db: Session = Depends(get_db),
+):
+    return service.like(db, current_user.id, payload.cocktailId)
+
+
+@delete("/unlike", response_model=LikeActionResponse)
+def unlike_cocktail(
+    payload: LikeRequest,
+    current_user: CurrentUser,
+    db: Session = Depends(get_db),
+):
+    return service.unlike(db, current_user.id, payload.cocktailId)
