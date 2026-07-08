@@ -1,12 +1,16 @@
-.PHONY: up up-d down logs rebuild shell check format format-check prod-up prod-down hooks ssh-check
+.PHONY: up up-local up-d down logs rebuild shell check format format-check prod-up prod-down hooks ssh-check
 
 # 빌드 전 GitHub SSH 인증 점검 (cocktail-mate-db private 레포 설치 전제)
 ssh-check:
 	@bash scripts/check-ssh.sh
 
-# Docker 컨테이너 실행 (로컬: api — DB는 .env의 OCI 원격 DB 사용)
+# Docker 컨테이너 실행 — 기본 .env(배포 DB·배포 프론트 URL) 기준
 up: ssh-check
 	docker compose up --build
+
+# 로컬 오버라이드로 실행 — .env 위에 .env.local(localhost 프론트/콜백/비보안쿠키)을 얹음
+up-local: ssh-check
+	docker compose -f docker-compose.yml -f docker-compose.local.yml up --build
 
 # 백그라운드 실행
 up-d: ssh-check

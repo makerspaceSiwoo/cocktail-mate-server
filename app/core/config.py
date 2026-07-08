@@ -10,9 +10,9 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
-        # .env(기본/배포값) → .env.local(로컬 오버라이드) 순으로 로드 (뒤 파일이 우선).
-        # 배포 서버엔 .env 만 두고, 로컬은 .env.local 로 localhost 값을 덮어쓴다.
-        env_file=(".env", ".env.local"),
+        # 기본은 .env(배포값: 배포 DB·프론트). 로컬 오버라이드가 필요할 때만
+        # `make up-local` 이 docker env_file 로 .env.local(localhost 값)을 위에 얹는다.
+        env_file=".env",
         env_file_encoding="utf-8",
         extra="ignore",
     )
