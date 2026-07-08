@@ -1,12 +1,13 @@
 fastapi
 uvicorn[standard]
-pytest
 sqlalchemy
 psycopg2-binary
 pgvector
 python-dotenv
 pydantic-settings
-boto3
-python-multipart
+# 인증(JWT 쿠키) — access/refresh 발급, rate limit, 소셜(카카오) HTTP 호출
+python-jose[cryptography]
+slowapi
+httpx
 # ORM 모델 (private 레포, 태그 고정 — 모델 변경 시 태그 업데이트)
-cocktail-mate-db @ git+ssh://git@github.com/makerspaceSiwoo/cocktail-mate-db.git@v0.3.0
+cocktail-mate-db @ git+ssh://git@github.com/makerspaceSiwoo/cocktail-mate-db.git@v0.5.0

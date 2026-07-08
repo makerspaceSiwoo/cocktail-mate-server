@@ -2,6 +2,7 @@
 
 프론트엔드 호환을 위해 필드명은 기존 mock 응답과 동일한 camelCase를 사용한다.
 """
+
 from pydantic import BaseModel
 
 
@@ -72,7 +73,7 @@ class CocktailDetailResponse(BaseModel):
     baseTag: str | None = None
     ingredients: list[CocktailIngredientDetail]
 
-    
+
 class CocktailListItem(BaseModel):
     id: int
     name: str
@@ -82,6 +83,8 @@ class CocktailListItem(BaseModel):
     description: str | None = None
     abv: float | None = None
     glass: str | None = None
+    # 로그인 시 해당 유저의 좋아요 여부. 비로그인은 항상 False.
+    isLiked: bool = False
 
 
 class CocktailListMeta(BaseModel):

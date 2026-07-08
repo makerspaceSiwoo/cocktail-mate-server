@@ -2,20 +2,20 @@
 
 경로/응답은 기존 단일 파일 구현과 동일하게 유지한다 (prefix 없음).
 """
+
 from fastapi import APIRouter, Depends, Query
 
 from sqlalchemy.orm import Session
 
 from app.cocktail.schemas import (
-    CocktailBrief,
     CocktailExplore,
-    CocktailSummary,
     DrinkOfTheDay,
     SearchResult,
     CocktailListResponse,
     BaseTagListResponse,
 )
 from app.cocktail.service import CocktailService
+from app.auth.dependencies import OptionalUser
 from app.core.database import get_db
 from app.cocktail.schemas import CocktailDetailResponse
 
@@ -40,12 +40,14 @@ def get_base_tags(db: Session = Depends(get_db)):
 
 @router.get("/list", response_model=CocktailListResponse)
 def cocktail_list(
+    current_user: OptionalUser,
     page: int = Query(1, ge=1),
     rpp: int = Query(10, ge=1, le=50),
     base: str | None = None,
     db: Session = Depends(get_db),
 ):
-    return service.list_cocktails(db, page, rpp, base)
+    user_id = current_user.id if current_user is not None else None
+    return service.list_cocktails(db, page, rpp, base, user_id)
 
 
 @router.get("/explore/{id}", response_model=CocktailExplore)

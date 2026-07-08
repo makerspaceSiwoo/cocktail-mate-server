@@ -17,6 +17,7 @@ class CocktailRepository:
         page: int,
         rpp: int,
         base: str | None,
+        liked_ids: set[int] | None = None,
     ) -> dict:
         query = db.query(Cocktail)
 
@@ -24,15 +25,12 @@ class CocktailRepository:
             query = query.filter(Cocktail.base_tag == base)
 
         cocktails = (
-            query
-            .order_by(Cocktail.id)
-            .offset((page - 1) * rpp)
-            .limit(rpp + 1)
-            .all()
+            query.order_by(Cocktail.id).offset((page - 1) * rpp).limit(rpp + 1).all()
         )
 
         has_next_page = len(cocktails) > rpp
         cocktails = cocktails[:rpp]
+        liked_ids = liked_ids or set()
 
         return {
             "items": [
@@ -45,6 +43,7 @@ class CocktailRepository:
                     "description": cocktail.description,
                     "abv": cocktail.abv,
                     "glass": cocktail.glass,
+                    "isLiked": cocktail.id in liked_ids,
                 }
                 for cocktail in cocktails
             ],
@@ -54,7 +53,7 @@ class CocktailRepository:
                 "hasNextPage": has_next_page,
             },
         }
-    
+
     def get_base_tags(self, db: Session) -> dict:
         rows = (
             db.query(Cocktail.base_tag)
@@ -64,9 +63,7 @@ class CocktailRepository:
             .all()
         )
 
-        return {
-            "items": [row[0] for row in rows]
-        }
+        return {"items": [row[0] for row in rows]}
 
     def search(self, keyword: str) -> list[dict]:
         kw = keyword.lower()
@@ -77,13 +74,9 @@ class CocktailRepository:
             or kw in c["baseTag"].lower()
             or kw in c["description"].lower()
         ]
-    
+
     def find_detail_by_id(self, db: Session, cocktail_id: int) -> dict | None:
-        cocktail = (
-            db.query(Cocktail)
-            .filter(Cocktail.id == cocktail_id)
-            .first()
-        )
+        cocktail = db.query(Cocktail).filter(Cocktail.id == cocktail_id).first()
 
         if cocktail is None:
             return None

@@ -1,5 +1,5 @@
 #!/bin/sh
-# push 전: ① main 직접 push 차단 ② 브랜치명 검증 ③ build(컴파일) 테스트
+# push 전: ① main 직접 push 차단 ② 브랜치명 검증 ③ ruff 포맷/린트 ④ build(컴파일) 테스트
 # 활성화: make hooks  (git config core.hooksPath .githooks)
 
 # ── 1) main 으로의 직접 push 차단 (PR 사용 강제) ──
@@ -19,7 +19,25 @@ if ! echo "$branch" | grep -qE "$pattern"; then
   exit 1
 fi
 
-# ── 3) build 테스트 (Python 문법/컴파일 체크) ──
+# ── 3) 포맷/린트 검사 (ruff) ──
+if [ -x .venv/bin/ruff ]; then RUFF=".venv/bin/ruff";
+elif command -v ruff >/dev/null 2>&1; then RUFF="ruff";
+else
+  echo "❌ ruff 없음 — 'pip install -r requirements-dev.txt' 후 다시 push 하세요."
+  exit 1
+fi
+echo "🎨 포맷/린트 검사: ruff format --check . && ruff check . ..."
+if ! "$RUFF" format --check .; then
+  echo "❌ 포맷이 맞지 않습니다 — 'make format' 실행 후 커밋하세요."
+  exit 1
+fi
+if ! "$RUFF" check .; then
+  echo "❌ lint 실패 — 수정 후 다시 push 하세요."
+  exit 1
+fi
+echo "✅ 포맷/린트 통과"
+
+# ── 4) build 테스트 (Python 문법/컴파일 체크) ──
 echo "🔧 build 체크: python -m compileall app ..."
 if ! python3 -m compileall -q app; then
   echo "❌ 컴파일 실패 — 문법 오류를 수정하세요."

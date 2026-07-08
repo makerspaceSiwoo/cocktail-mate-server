@@ -5,6 +5,7 @@
 여기서는 엔진/세션/세션 의존성(`get_db`)과 Base re-export만 제공한다.
 접속 문자열은 `app.core.db_settings.db_settings.DATABASE_URL`(.env에서 주입).
 """
+
 from collections.abc import Generator
 
 from cocktail_mate_db.base import Base  # noqa: F401 — 기존 import 경로 호환용 re-export

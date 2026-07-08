@@ -1,4 +1,5 @@
 """좋아요 응답 스키마."""
+
 from pydantic import BaseModel
 
 

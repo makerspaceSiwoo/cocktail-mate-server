@@ -1,0 +1,10 @@
+# ruff — 포맷터 + 린터 설정.
+# 사용: `make format`(자동 정리) / `make format-check`(검사) / pre-push 훅.
+line-length = 88
+
+[lint]
+# 기본 규칙(E4/E7/E9, F) 유지. 필요 시 여기에 규칙 추가(예: "I" 임포트 정렬).
+select = ["E4", "E7", "E9", "F"]
+
+[format]
+quote-style = "double"
