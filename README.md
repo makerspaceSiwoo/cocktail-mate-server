@@ -14,12 +14,12 @@
    ex) issue number 1이 유저정보 crud 구현이라면 해당 이슈 branch 명은
         feat/#1-userInfo-crud
 
-4) 해당 branch에서 작업 후 로컬 테스트
-로컬 테스트 방법은 
-    3.로컬 환경 세팅 및 테스트 방법
+4) 해당 branch에서 작업 후 로컬에서 동작 확인
+확인 방법은 
+    3.로컬 환경 세팅 및 실행 방법
 에 나와있습니다. 
 
-5) 로컬 테스트 통과시 PR
+5) 로컬 확인 후 PR
 
 6) copilot & 팀원 리뷰 완료 후 부모 branch에 merge(main에는 XX)
 
@@ -40,7 +40,7 @@
 | !BREAKING CHANGE | 커다란 API 변경의 경우 |
 | !HOTFIX | 급하게 치명적인 버그를 고쳐야 하는 경우 |
 
-## 3. 로컬 환경 세팅 및 테스트 방법
+## 3. 로컬 환경 세팅 및 실행 방법
 0) 요구사항
 Docker를 설치해주시기 바랍니다.
 아래 명령어들을 실행하려면 Docker가 실행중 이어야합니다. 
@@ -60,10 +60,9 @@ make up: Docker 컨테이너 실행
 make shell: 서버 컨테이너 접속
 DB 직접 조회: DBeaver로 OCI 개발 DB 접속 (docs/ONBOARDING.md 참고)
 
-3) 테스트
+3) 로컬 확인
 make check: 컴파일이 되는지 체크
 Swagger: http://localhost:8000/docs 접속
-make test: /tests의 테스트들 시행
 
 ## 4. Git Hooks (협업 규칙, 최초 1회 설정)
 레포 클론 후 한 번 실행하세요:
