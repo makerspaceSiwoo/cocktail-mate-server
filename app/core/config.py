@@ -10,7 +10,9 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
-        env_file=".env",
+        # .env(기본/배포값) → .env.local(로컬 오버라이드) 순으로 로드 (뒤 파일이 우선).
+        # 배포 서버엔 .env 만 두고, 로컬은 .env.local 로 localhost 값을 덮어쓴다.
+        env_file=(".env", ".env.local"),
         env_file_encoding="utf-8",
         extra="ignore",
     )
