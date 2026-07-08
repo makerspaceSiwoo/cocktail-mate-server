@@ -23,14 +23,6 @@ class Settings(BaseSettings):
     # ---- Database ----
     # DB 접속(DATABASE_URL)은 app/core/db_settings.py(서버 연결 전용, 수정 금지)에서 관리.
 
-    # ---- Object Storage (S3 compatible: 로컬 MinIO / 프로덕션 Oracle Object Storage) ----
-    storage_endpoint: str = "http://minio:9000"
-    storage_region: str = "ap-chuncheon-1"
-    storage_access_key: str = "minioadmin"
-    storage_secret_key: str = "minioadmin"
-    storage_bucket: str = "cocktail-images"
-    storage_public_base_url: str = "http://localhost:9000/cocktail-images"
-
     # ---- CORS ----
     # production 에서 허용할 프론트 origin 목록(콤마 구분). 프론트 origin 3개를 등록한다:
     #   로컬 개발 / 테스트(preview) / 프로덕션 Vercel.

@@ -18,7 +18,6 @@ from app.core.config import get_settings
 from app.core.csrf import CSRFOriginMiddleware
 from app.core.database import engine
 from app.core.rate_limit import limiter
-from app.core.storage import check_bucket
 from app.like.router import router as like_router
 
 from slowapi import _rate_limit_exceeded_handler
@@ -80,8 +79,8 @@ def create_app() -> FastAPI:
 
     @app.get("/health", tags=["infra"])
     def health():
-        """DB 연결 / pgvector 확장 / 오브젝트 스토리지 접근 상태를 점검한다."""
-        status = {"db": "fail", "vector": "fail", "storage": "fail"}
+        """DB 연결 / pgvector 확장 상태를 점검한다."""
+        status = {"db": "fail", "vector": "fail"}
 
         try:
             with engine.connect() as conn:
@@ -93,12 +92,6 @@ def create_app() -> FastAPI:
                 status["vector"] = "ok" if has_vector else "missing"
         except Exception as exc:  # noqa: BLE001 - 헬스체크는 원인 문자열만 노출
             status["db"] = f"fail: {type(exc).__name__}"
-
-        try:
-            check_bucket()
-            status["storage"] = "ok"
-        except Exception as exc:  # noqa: BLE001
-            status["storage"] = f"fail: {type(exc).__name__}"
 
         return status
 

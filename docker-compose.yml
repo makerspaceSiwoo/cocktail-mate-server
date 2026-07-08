@@ -16,25 +16,6 @@ services:
     env_file:
       - .env
 
-  # (opt-in) 오프라인 작업용 로컬 S3 호환 스토리지. 평소엔 .env의 STORAGE_*가
-  # Oracle Object Storage를 가리키므로 필요 없다.
-  #   docker compose --profile local-storage up -d
-  #   버킷 생성은 minio 콘솔(localhost:9001)에서 수동으로.
-  minio:
-    image: minio/minio
-    container_name: minio
-    restart: always
-    profiles: ["local-storage"]
-    command: server /data --console-address ":9001"
-    environment:
-      MINIO_ROOT_USER: ${STORAGE_ACCESS_KEY}
-      MINIO_ROOT_PASSWORD: ${STORAGE_SECRET_KEY}
-    ports:
-      - "9000:9000"   # S3 API
-      - "9001:9001"   # 웹 콘솔
-    volumes:
-      - minio_data:/data
-
   # 로컬 개발 중 외부에서 API를 호출해볼 수 있게 하는 ngrok 터널 (opt-in).
   #   1) .env 에 NGROK_AUTHTOKEN 설정 (https://dashboard.ngrok.com/get-started/your-authtoken)
   #   2) docker compose --profile tunnel up -d
@@ -50,6 +31,3 @@ services:
       NGROK_AUTHTOKEN: ${NGROK_AUTHTOKEN:-}
     depends_on:
       - api
-
-volumes:
-  minio_data:

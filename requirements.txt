@@ -5,8 +5,6 @@ psycopg2-binary
 pgvector
 python-dotenv
 pydantic-settings
-boto3
-python-multipart
 # 인증(JWT 쿠키) — access/refresh 발급, rate limit, 소셜(카카오) HTTP 호출
 python-jose[cryptography]
 slowapi
