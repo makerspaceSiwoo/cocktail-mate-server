@@ -18,6 +18,7 @@ from sqlalchemy.orm import Session
 
 from cocktail_mate_db.models import RefreshToken, User
 
+from app.auth.nickname import generate_random_nickname
 from app.auth.providers import SocialProfile
 from app.auth.repository import AuthRepository
 from app.core.config import get_settings
@@ -52,15 +53,13 @@ class AuthService:
         """소셜 프로필로 로그인/가입 ((provider, provider_id) 기준 upsert).
 
         이메일은 프로필에 있으면 저장하고 없으면 NULL. 닉네임은 중복 허용(식별자는 provider_id)이며
-        프로필에 없으면 provider 기반 기본값을 부여한다.
+        프로필에 없으면 랜덤 닉네임(형용사+명사)을 부여한다.
         """
         user = self.repository.get_user_by_provider_id(
             db, profile.provider, profile.provider_id
         )
         if user is None:
-            nickname = (profile.nickname or "").strip() or (
-                f"{profile.provider}{profile.provider_id[:8]}"
-            )
+            nickname = (profile.nickname or "").strip() or generate_random_nickname()
             user = User(
                 email=profile.email,
                 nickname=nickname,
