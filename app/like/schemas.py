@@ -21,3 +21,7 @@ class LikeActionResponse(BaseModel):
     isLiked: bool
     likeCount: int
     message: str
+
+
+class LikeRequest(BaseModel):
+    cocktailId: int
