@@ -18,7 +18,13 @@ from app.cocktail.service import CocktailService
 from app.auth.dependencies import OptionalUser
 from app.core.database import get_db
 from app.cocktail.schemas import CocktailDetailResponse
-from app.like.schemas import LikeActionResponse, LikeListResponse, LikeRequest
+from app.like.schemas import (
+    LikeActionResponse, 
+    LikeListResponse, 
+    LikeRequest,
+)
+from cocktail_mate_db.models import User
+
 
 router = APIRouter(tags=["cocktail"])
 service = CocktailService()
