@@ -63,9 +63,17 @@ def create_app() -> FastAPI:
         "allow_methods": ["*"],
         "allow_headers": ["*"],
     }
+    # allow_credentials=True 라 "*" 와일드카드는 불가 → 정규식으로 매칭하면
+    # Starlette 가 요청 Origin 을 그대로 반사(fullmatch)한다.
+    origin_regexes: list[str] = []
+    if settings.cors_origin_regex:
+        # production: CORS_ORIGIN_DOMAIN 의 모든 서브도메인(+apex) 자동 허용
+        origin_regexes.append(settings.cors_origin_regex)
     if not settings.is_production:
         # 개발 환경: localhost / 127.0.0.1 의 모든 포트(3000, 6006 등)를 자동 허용
-        cors_kwargs["allow_origin_regex"] = r"https?://(localhost|127\.0\.0\.1)(:\d+)?"
+        origin_regexes.append(r"https?://(localhost|127\.0\.0\.1)(:\d+)?")
+    if origin_regexes:
+        cors_kwargs["allow_origin_regex"] = "|".join(f"(?:{r})" for r in origin_regexes)
     app.add_middleware(CORSMiddleware, **cors_kwargs)
 
     # ── CSRF 방어 (Origin allowlist) ──

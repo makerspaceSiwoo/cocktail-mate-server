@@ -3,6 +3,7 @@
 모든 비밀값/환경값은 `.env`에서 주입한다 (커밋 금지). 예시는 `.env.example` 참고.
 """
 
+import re
 from functools import lru_cache
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -32,6 +33,12 @@ class Settings(BaseSettings):
     # 개발 환경(app_env != production)에서는 localhost 모든 포트가 자동 허용된다.
     # 이 목록은 CSRF 미들웨어(app/core/csrf.py)의 Origin allowlist 로도 재사용된다.
     cors_origins: str = ""
+
+    # 이 base domain 의 모든 https 서브도메인(+apex)을 CORS/CSRF 에서 추가 허용한다.
+    #   예) "cocktail-mate.com" → https://test.cocktail-mate.com, https://www.cocktail-mate.com,
+    #        https://cocktail-mate.com 등을 매 origin 마다 등록하지 않아도 전부 통과.
+    # 비우면 서브도메인 와일드카드 비활성(cors_origins exact 목록만 사용).
+    cors_origin_domain: str = ""
 
     # ---- Auth (JWT 쿠키) ----
     # JWT 서명 키 — `openssl rand -hex 32` 로 생성한 32바이트 이상 랜덤값을 .env에 주입.
@@ -64,6 +71,19 @@ class Settings(BaseSettings):
     @property
     def cors_origin_list(self) -> list[str]:
         return [o.strip() for o in self.cors_origins.split(",") if o.strip()]
+
+    @property
+    def cors_origin_regex(self) -> str | None:
+        """cors_origin_domain 의 모든 서브도메인(+apex)을 매칭하는 정규식(미설정 시 None).
+
+        fullmatch 기준. 앞의 `\\.` 가드 덕분에 `https://evilcocktail-mate.com` 처럼
+        도메인을 접두어로 흉내낸 origin 은 통과하지 못한다(정확히 서브도메인/apex 만 매칭).
+        CORSMiddleware(allow_origin_regex)와 CSRF 미들웨어가 공유한다.
+        """
+        if not self.cors_origin_domain:
+            return None
+        escaped = re.escape(self.cors_origin_domain)
+        return rf"https://([a-z0-9-]+\.)*{escaped}"
 
     @property
     def is_production(self) -> bool:
