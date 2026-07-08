@@ -2,7 +2,7 @@
 
 소셜 로그인 전용:
 - 소셜 로그인/가입: GET /auth/{provider}/login → provider 인가 → GET /auth/{provider}/callback
-- 세션: /auth/refresh(rotation), /auth/logout, /auth/me
+- 세션: /auth/refresh(rotation), /auth/logout, /auth/my-info
 """
 
 from __future__ import annotations
@@ -43,7 +43,7 @@ def _user_response(user) -> UserResponse:
     )
 
 
-# ── 세션 (refresh / logout / me) ────────────────────────────
+# ── 세션 (refresh / logout / my-info) ───────────────────────
 @router.post("/refresh", response_model=MessageResponse)
 def refresh(
     request: Request,
@@ -68,8 +68,8 @@ def logout(
     return MessageResponse(message="로그아웃 되었습니다.")
 
 
-@router.get("/me", response_model=UserResponse)
-def me(current_user: CurrentUser):
+@router.get("/my-info", response_model=UserResponse)
+def my_info(current_user: CurrentUser):
     return _user_response(current_user)
 
 
