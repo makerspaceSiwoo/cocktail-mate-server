@@ -100,3 +100,7 @@ class CocktailListResponse(BaseModel):
 
 class BaseTagListResponse(BaseModel):
     items: list[str]
+
+
+class LikeRequest(BaseModel):
+    cocktailId: int
