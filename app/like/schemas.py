@@ -4,7 +4,7 @@ from pydantic import BaseModel
 
 
 class LikeRequest(BaseModel):
-    cocktailId: int
+    cocktailId: int | None = None
 
 
 class LikedCocktail(BaseModel):
