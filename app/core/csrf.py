@@ -40,9 +40,15 @@ class CSRFOriginMiddleware(BaseHTTPMiddleware):
         self._settings = settings
         self._allowed = set(settings.cors_origin_list)
         self._allow_localhost = not settings.is_production
+        # CORSMiddleware 와 동일한 서브도메인 와일드카드 규칙을 공유(설정 시).
+        regex = settings.cors_origin_regex
+        self._origin_re = re.compile(regex) if regex else None
 
     def _origin_allowed(self, origin: str) -> bool:
         if origin in self._allowed:
+            return True
+        # CORS 와 동일하게 fullmatch (부분 일치로 인한 우회 방지).
+        if self._origin_re is not None and self._origin_re.fullmatch(origin):
             return True
         if self._allow_localhost and _LOCALHOST_ORIGIN_RE.match(origin):
             return True
