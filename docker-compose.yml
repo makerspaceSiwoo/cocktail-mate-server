@@ -9,6 +9,10 @@ services:
       context: .
       ssh: ["default"]   # cocktail-mate-db(private) 설치용 — 호스트 ssh-agent의 GitHub 키 사용
     container_name: fastapi-server
+    # 개발 전용 핫리로드: 아래 볼륨 마운트(.:/app)로 호스트 코드 변경이 컨테이너에 즉시 반영되고,
+    # uvicorn --reload 가 app/ 을 감시하다 .py 변경 시 서버를 자동 재기동한다.
+    # (Dockerfile CMD 는 그대로 두어 prod 이미지에는 --reload 가 들어가지 않는다.)
+    command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload", "--reload-dir", "app"]
     ports:
       - "8000:8000"
     volumes:
