@@ -7,6 +7,8 @@ from fastapi import APIRouter, Depends, Query
 
 from sqlalchemy.orm import Session
 
+from cocktail_mate_db.models import User
+
 from app.cocktail.schemas import (
     CocktailExplore,
     DrinkOfTheDay,
@@ -15,7 +17,10 @@ from app.cocktail.schemas import (
     BaseTagListResponse,
 )
 from app.cocktail.service import CocktailService
-from app.auth.dependencies import OptionalUser
+from app.auth.dependencies import (
+    OptionalUser,
+    get_current_user,
+)
 from app.core.database import get_db
 from app.cocktail.schemas import CocktailDetailResponse
 from app.like.schemas import (
@@ -23,7 +28,6 @@ from app.like.schemas import (
     LikeListResponse, 
     LikeRequest,
 )
-from cocktail_mate_db.models import User
 
 
 router = APIRouter(tags=["cocktail"])
@@ -75,16 +79,24 @@ def get_cocktail_detail(id: int, db: Session = Depends(get_db)):
 @router.post("/like", response_model=LikeActionResponse)
 def like_cocktail(
     payload: LikeRequest,
-    current_user: CurrentUser,
+    current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
     return service.like(db, current_user.id, payload.cocktailId)
 
 
-@delete("/unlike", response_model=LikeActionResponse)
+@router.delete("/unlike", response_model=LikeActionResponse)
 def unlike_cocktail(
     payload: LikeRequest,
-    current_user: CurrentUser,
+    current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
     return service.unlike(db, current_user.id, payload.cocktailId)
+
+
+@router.get("/like/list", response_model=LikeListResponse)
+def get_like_list(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    return service.like_list(db, current_user.id)
