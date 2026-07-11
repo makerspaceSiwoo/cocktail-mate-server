@@ -1,9 +1,0 @@
-# `make up-local` 전용 오버라이드.
-# 기본 `make up` 은 .env(배포 DB·배포 프론트 URL)로 뜬다. 로컬 e2e(localhost 프론트/카카오 콜백,
-# 비보안 쿠키)를 하고 싶을 때만 이 오버라이드로 .env 위에 .env.local 을 얹는다.
-#   docker compose -f docker-compose.yml -f docker-compose.local.yml up --build
-services:
-  api:
-    env_file:
-      - .env
-      - .env.local
