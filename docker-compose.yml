@@ -17,8 +17,12 @@ services:
       - "8000:8000"
     volumes:
       - .:/app            # 핫리로드(개발 편의)
+    # env 파일은 Makefile(up/up-d)이 골라 ENV_FILE 로 주입한다:
+    #   .env.local 있으면 그것만, 없으면 .env, 둘 다 없으면 make 가 에러.
+    # 각 파일은 self-contained(모든 키 포함) — 병합이 아니라 택일이다.
+    # (직접 `docker compose up` 시엔 기본값 .env 사용)
     env_file:
-      - .env
+      - ${ENV_FILE:-.env}
 
   # 로컬 개발 중 외부에서 API를 호출해볼 수 있게 하는 ngrok 터널 (opt-in).
   #   1) .env 에 NGROK_AUTHTOKEN 설정 (https://dashboard.ngrok.com/get-started/your-authtoken)
