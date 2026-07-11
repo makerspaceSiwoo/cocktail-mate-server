@@ -3,6 +3,10 @@
 from pydantic import BaseModel
 
 
+class LikeRequest(BaseModel):
+    cocktailId: int | None = None
+
+
 class LikedCocktail(BaseModel):
     cocktailId: int
     cocktailName: str
