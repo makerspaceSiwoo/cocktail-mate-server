@@ -76,6 +76,14 @@ def my_info(current_user: CurrentUser):
 # ── 소셜 로그인 (provider 일반화; 현재 kakao 만 등록) ────────
 @router.get("/{provider}/login")
 def social_login_redirect(provider: str, response: Response):
+    """소셜 로그인 시작 — provider 인가 페이지로 302 리다이렉트.
+
+    ⚠️ Swagger 의 **Execute 버튼은 쓰지 마세요.** fetch(XHR)라 302 를 따라 provider 로
+    cross-origin 요청이 가 CORS 로 막힙니다. 아래 링크를 **클릭**하면 브라우저가 이동해
+    카카오 로그인 페이지가 정상적으로 뜹니다(로그인 후 이 문서로 돌아옵니다):
+
+    👉 [카카오 로그인 시작하기](/auth/kakao/login)
+    """
     social = get_provider(provider)
     if social is None:
         raise HTTPException(
