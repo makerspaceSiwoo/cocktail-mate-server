@@ -12,7 +12,7 @@ from cocktail_mate_db.models import User
 from app.auth.dependencies import get_current_user
 from app.core.database import get_db
 from app.like.schemas import (
-    LikeActionResponse, 
+    LikeActionResponse,
     LikeListResponse,
     LikeRequest,
 )
@@ -31,7 +31,6 @@ def like_cocktail(
     return service.like(db, current_user.id, payload.cocktailId)
 
 
-
 @router.delete("/unlike", response_model=LikeActionResponse)
 def unlike_cocktail(
     payload: LikeRequest,
@@ -39,7 +38,6 @@ def unlike_cocktail(
     db: Session = Depends(get_db),
 ):
     return service.unlike(db, current_user.id, payload.cocktailId)
-
 
 
 @router.get("/like/list", response_model=LikeListResponse)
