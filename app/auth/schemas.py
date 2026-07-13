@@ -20,3 +20,8 @@ class UserResponse(BaseModel):
 
 class MessageResponse(BaseModel):
     message: str
+
+
+class NicknameChangeRequest(BaseModel):
+    """닉네임 변경 요청 스키마."""
+    nickname: str
