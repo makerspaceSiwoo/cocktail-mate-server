@@ -21,7 +21,11 @@ from app.auth.cookies import (
 )
 from app.auth.dependencies import CurrentUser
 from app.auth.providers import SocialAuthError, get_provider
-from app.auth.schemas import MessageResponse, UserResponse
+from app.auth.schemas import (
+  MessageResponse, 
+  NicknameChangeRequest,
+  UserResponse,
+)
 from app.auth.service import AuthService
 from app.core.config import get_settings
 from app.core.database import get_db
@@ -72,6 +76,20 @@ def logout(
 @my_router.get("/info", response_model=UserResponse)
 def my_info(current_user: CurrentUser):
     return _user_response(current_user)
+
+
+@my_router.patch("/info", response_model=UserResponse)
+def change_nickname(
+    payload: NicknameChangeRequest,
+    current_user: CurrentUser,
+    db: Session = Depends(get_db),
+):
+    updated_user = service.change_nickname(
+        db,
+        current_user,
+        payload.nickname,
+    )
+    return _user_response(updated_user)
 
 
 # ── 소셜 로그인 (provider 일반화; 현재 kakao 만 등록) ────────
