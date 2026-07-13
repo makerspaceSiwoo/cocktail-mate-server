@@ -3,9 +3,9 @@
 소셜 로그인 전용 — 이메일/비밀번호 입력 스키마는 없다.
 """
 
-import re
-
 from __future__ import annotations
+
+import re
 
 from pydantic import BaseModel, field_validator
 
