@@ -76,6 +76,9 @@ class CocktailService:
             "ABV": 21.3,
         }
 
+    def daily_recommend(self, db: Session, count: int = 5) -> dict:
+        return {"items": self.repository.random_cocktails(db, count)}
+
     def get_detail(self, db: Session, cocktail_id: int) -> dict:
         cocktail = self.repository.find_detail_by_id(db, cocktail_id)
 

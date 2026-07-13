@@ -100,3 +100,16 @@ class CocktailListResponse(BaseModel):
 
 class BaseTagListResponse(BaseModel):
     items: list[str]
+
+
+class DailyRecommendItem(BaseModel):
+    id: int
+    name: str
+    description: str | None = None
+    baseTag: str | None = None
+    abv: float | None = None
+    imageUrl: str | None = None
+
+
+class DailyRecommendResponse(BaseModel):
+    items: list[DailyRecommendItem]

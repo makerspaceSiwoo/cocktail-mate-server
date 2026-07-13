@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 from app.cocktail.schemas import (
     CocktailExplore,
     DrinkOfTheDay,
+    DailyRecommendResponse,
     SearchResult,
     CocktailListResponse,
     BaseTagListResponse,
@@ -58,6 +59,11 @@ def explore_cocktail(id: int):
 @router.get("/drink-of-the-day", response_model=DrinkOfTheDay)
 def drink_of_the_day():
     return service.drink_of_the_day()
+
+
+@router.get("/daily-recommend", response_model=DailyRecommendResponse)
+def daily_recommend(db: Session = Depends(get_db)):
+    return service.daily_recommend(db)
 
 
 @router.get("/cocktail/{id}", response_model=CocktailDetailResponse)
