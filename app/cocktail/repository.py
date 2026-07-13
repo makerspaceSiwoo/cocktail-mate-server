@@ -55,8 +55,14 @@ class CocktailRepository:
             },
         }
 
-    def random_cocktails(self, db: Session, count: int) -> list[dict]:
-        cocktails = db.query(Cocktail).order_by(func.random()).limit(count).all()
+    def daily_cocktails(self, db: Session, seed: str, count: int) -> list[dict]:
+        # seed(예: KST 날짜 'YYYY-MM-DD')로 결정론적 정렬 → 같은 날은 항상 같은 결과.
+        cocktails = (
+            db.query(Cocktail)
+            .order_by(func.md5(func.concat(seed, Cocktail.id)))
+            .limit(count)
+            .all()
+        )
 
         return [
             {
