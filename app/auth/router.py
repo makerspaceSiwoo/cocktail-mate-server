@@ -27,7 +27,7 @@ from app.core.config import get_settings
 from app.core.database import get_db
 
 router = APIRouter(prefix="/auth", tags=["auth"])
-my_router = APIRouter(prefix="/my", tags=["user"])
+my_router = APIRouter(prefix="/my", tags=["my"])
 service = AuthService()
 
 # 카카오 콜백 CSRF 방어용 임시 state 쿠키.
@@ -69,7 +69,7 @@ def logout(
     return MessageResponse(message="로그아웃 되었습니다.")
 
 
-@router.get("/info", response_model=UserResponse)
+@my_router.get("/info", response_model=UserResponse)
 def my_info(current_user: CurrentUser):
     return _user_response(current_user)
 
