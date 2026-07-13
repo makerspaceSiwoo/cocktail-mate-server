@@ -29,6 +29,16 @@ class AuthRepository:
         db.add(user)
         db.flush()  # id 확보 (커밋은 service)
         return user
+    
+    def update_nickname(
+            self,
+            db: Session,
+            user: User,
+            nickname: str,
+    ) -> User:
+        user.nickname = nickname
+        db.flush()
+        return user
 
     # ── RefreshToken ────────────────────────────────────────
     def add_refresh_token(
