@@ -12,7 +12,7 @@ from slowapi.errors import RateLimitExceeded
 from slowapi.middleware import SlowAPIMiddleware
 from sqlalchemy import text
 
-from app.auth.router import router as auth_router
+from app.auth.router import my_router, router as auth_router
 from app.cocktail.router import router as cocktail_router
 from app.core.config import get_settings
 from app.core.csrf import CSRFOriginMiddleware
@@ -83,6 +83,7 @@ def create_app() -> FastAPI:
 
     app.include_router(cocktail_router)
     app.include_router(auth_router)
+    app.include_router(my_router)
     app.include_router(like_router)
 
     @app.get("/health", tags=["infra"])
