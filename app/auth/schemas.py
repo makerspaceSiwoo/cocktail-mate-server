@@ -3,9 +3,11 @@
 소셜 로그인 전용 — 이메일/비밀번호 입력 스키마는 없다.
 """
 
+import re
+
 from __future__ import annotations
 
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 
 
 class UserResponse(BaseModel):
@@ -25,3 +27,18 @@ class MessageResponse(BaseModel):
 class NicknameChangeRequest(BaseModel):
     """닉네임 변경 요청 스키마."""
     nickname: str
+
+    @field_validator("nickname")
+    @classmethod
+    def validate_nickname(cls, value: str) -> str:
+        value = value.strip()
+        if len(value) < 2 or len(value) > 10:
+            raise ValueError("닉네임은 2~10자여야 합니다.")
+        if re.fullmatch(
+            r"[가-힣a-zA-Z0-9]+(?: [가-힣a-zA-Z0-9]+)*",
+            value,
+        ) is None:
+            raise ValueError(
+                "닉네임은 한글, 영문, 숫자로 구성된 2~10자여야 합니다."
+            )
+        return value
