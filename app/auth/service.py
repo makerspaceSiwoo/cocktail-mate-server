@@ -128,6 +128,33 @@ class AuthService:
             self.repository.delete_refresh_tokens_for_user(db, stored.user_id)
             db.commit()
 
+    # ── 닉네임 변경 ──────────────────────────────────────────
+    def change_nickname(
+            self,
+            db: Session,
+            user: User,
+            nickname: str,
+    ) -> User:
+        """현재 로그인한 사용자의 닉네임을 변경한다."""
+        if user.nickname == nickname:
+            return user
+        
+        try:
+            updated_user = self.repository.update_nickname(
+                db,
+                user,
+                nickname,
+            )
+            db.commit()
+            db.refresh(updated_user)
+        except IntegrityError:
+            db.rollback()
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="이미 사용 중인 닉네임입니다.",
+            ) from None
+        return updated_user
+
     # ── 세션(access+refresh) 발급 헬퍼 ───────────────────────
     def _issue_session(self, db: Session, user_id: int) -> tuple[str, str]:
         """access JWT + refresh JWT 발급 & refresh_tokens 행 생성. 커밋은 호출부.
