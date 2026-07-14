@@ -39,6 +39,7 @@ class NicknameChangeRequest(BaseModel):
             value,
         ) is None:
             raise ValueError(
-                "닉네임은 한글, 영문, 숫자로 구성된 2~10자여야 합니다."
+                "닉네임은 2~10자의 한글, 영문, 숫자와 하이픈(-), 및줄(_)만 사용할 수 있으며, "
+                "하이픈과 밑줄은 처음, 끝 또는 연속해서 사용할 수 없습니다."
             )
         return value
