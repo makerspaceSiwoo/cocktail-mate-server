@@ -35,7 +35,7 @@ class NicknameChangeRequest(BaseModel):
         if len(value) < 2 or len(value) > 10:
             raise ValueError("닉네임은 2~10자여야 합니다.")
         if re.fullmatch(
-            r"[가-힣a-zA-Z0-9]+(?: [가-힣a-zA-Z0-9]+)*",
+            r"^[가-힣a-zA-Z0-9]+([-_][가-힣a-zA-Z0-9]+)*$",
             value,
         ) is None:
             raise ValueError(
