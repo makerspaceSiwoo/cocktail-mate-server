@@ -4,6 +4,7 @@
 (생성자에서 `Session`을 주입받는 형태로 확장 예정).
 """
 
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.cocktail.mock import MOCK_COCKTAILS
@@ -53,6 +54,27 @@ class CocktailRepository:
                 "hasNextPage": has_next_page,
             },
         }
+
+    def daily_cocktails(self, db: Session, seed: str, count: int) -> list[dict]:
+        # seed(예: KST 날짜 'YYYY-MM-DD')로 결정론적 정렬 → 같은 날은 항상 같은 결과.
+        cocktails = (
+            db.query(Cocktail)
+            .order_by(func.md5(func.concat(seed, Cocktail.id)))
+            .limit(count)
+            .all()
+        )
+
+        return [
+            {
+                "id": cocktail.id,
+                "name": cocktail.name,
+                "description": cocktail.description,
+                "baseTag": cocktail.base_tag,
+                "abv": cocktail.abv,
+                "imageUrl": cocktail.image_url,
+            }
+            for cocktail in cocktails
+        ]
 
     def get_base_tags(self, db: Session) -> dict:
         rows = (
