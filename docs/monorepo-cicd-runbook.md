@@ -62,7 +62,7 @@ It is no longer referenced anywhere in the codebase after the monorepo integrati
 
 Enable the following on **both** `main` and `develop`:
 
-- **Require status checks to pass before merging** → add the `ci` job from `.github/workflows/ci.yml`.
+- **Require status checks to pass before merging** → add the required status checks: `lint`, `schema`, `docker-build` from `.github/workflows/ci.yml`.
   This is the enforcement mechanism for "deploy only after CI passes" — `deploy.yml` is push-triggered
   and will run immediately after merge, so CI must gate the merge itself.
 
@@ -138,7 +138,7 @@ In Settings → Environments → `production`, add at least one required reviewe
 
 ### C6. Trigger apply via workflow_dispatch
 
-Go to Actions → `Terraform CI` → Run workflow → `action: apply`. The job will wait for environment
+Go to Actions → `Terraform` → Run workflow → `action: apply`. The job will wait for environment
 approval before running `terraform apply -auto-approve -no-color tfplan`.
 
 ---
