@@ -1,6 +1,6 @@
 """Alembic 마이그레이션 환경.
 
-- DB 접속: 전역 settings.DATABASE_URL (.env에서 읽음) — alembic.ini에는 커밋하지 않는다.
+- DB 접속: 전역 settings.admin_url (ALEMBIC_DATABASE_URL, 또는 폴백 DATABASE_URL) — alembic.ini에는 커밋하지 않는다.
 - target_metadata: cocktail_mate_db 패키지 import만으로 전 모델이 등록된다.
 """
 from logging.config import fileConfig
@@ -16,7 +16,7 @@ config = context.config
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
-config.set_main_option("sqlalchemy.url", settings.DATABASE_URL)
+config.set_main_option("sqlalchemy.url", settings.admin_url)
 
 target_metadata = Base.metadata
 
