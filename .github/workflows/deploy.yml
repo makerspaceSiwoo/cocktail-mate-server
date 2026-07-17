@@ -94,6 +94,7 @@ jobs:
             sudo API_IMAGE="$API_TAG" CADDY_IMAGE="$CADDY_TAG" docker compose -f docker-compose.prod.yml pull
 
             # 5. 마이그레이션 전용 env 파일 (cm_admin, ALEMBIC_DATABASE_URL 포함 — API 컨테이너에는 절대 노출 X)
+            trap 'rm -f /tmp/cm_migration.env' EXIT
             printf '%s' "$MIGRATION_ENV_FILE" > /tmp/cm_migration.env && chmod 600 /tmp/cm_migration.env
 
             # 6. Alembic 마이그레이션 (one-off 컨테이너) — 실패 시 set -e 가 즉시 중단해 API up 이 실행되지 않는다
