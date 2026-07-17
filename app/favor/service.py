@@ -22,6 +22,9 @@ class FavorService:
             return []
         n = len(embeddings)
         centroid = [sum(col) / n for col in zip(*embeddings)]
+        # 정반대 취향이 상쇄돼 영벡터가 되면 코사인 거리가 NaN → 정렬 불능. 방어적으로 빈 목록.
+        if not any(centroid):
+            return []
         exclude_ids = self.repository.liked_ids(db, user_id)
         return self.repository.nearest_within(
             db,

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.orm import Session
 
 from cocktail_mate_db.models import Cocktail, Like
@@ -29,6 +29,9 @@ class FavorRepository:
         max_distance: float,
         limit: int,
     ) -> list[dict]:
+        # HNSW 반복 스캔(pgvector 0.8+): 거리 필터 + 좋아요 제외로 후보가 걸러져도 LIMIT 만큼
+        # 계속 스캔해 결과가 모자라게(under-fill) 반환되는 것을 막는다. 트랜잭션 로컬 설정.
+        db.execute(text("SET LOCAL hnsw.iterative_scan = relaxed_order"))
         dist = Cocktail.embedding.cosine_distance(centroid)
         conditions = [Cocktail.embedding.isnot(None), dist <= max_distance]
         if exclude_ids:
