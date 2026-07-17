@@ -9,7 +9,7 @@ cm_dml에서 쓰기 권한을 회수해 **읽기 전용**으로 둔다(아래 GR
 이 회수는 테이블이 존재할 때만 적용되므로, **신규 DB는 migrate-up 후 한 번 더**
 이 스크립트를 돌려야 카탈로그 읽기 전용이 실제로 걸린다(기존 DB는 1회 실행이면 됨).
 
-실행 (DATABASE_URL은 cm_admin 계정이어야 함):
+실행 (ALEMBIC_DATABASE_URL이 cm_admin 계정이어야 함; 없으면 DATABASE_URL 로 폴백):
     python scripts/apply_roles.py
 재실행해도 안전(계정이 있으면 비밀번호만 갱신, 권한은 멱등).
 """

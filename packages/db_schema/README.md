@@ -2,11 +2,17 @@
 
 cocktail-mate의 **canonical DB 레포** (private): SQLAlchemy 모델 + Alembic 마이그레이션 + OCI 인프라(Terraform) + DB 운영.
 
-api-server는 이 레포를 pip 패키지로 설치해 모델을 공유한다:
+api-server는 이 패키지를 모노레포 로컬 패키지로 설치해 모델을 공유한다:
 
 ```
-cocktail-mate-db @ git+ssh://git@github.com/makerspaceSiwoo/cocktail-mate-db.git@v0.1.0
+# cocktail-mate-server/requirements.txt (모노레포 로컬 editable 설치)
+-e ./packages/db_schema[migrations]
 ```
+
+> **이전 방식** (`git+ssh://git@github.com/makerspaceSiwoo/cocktail-mate-db.git@v0.1.0`) 은 모노레포 통합(Task 2) 이후 더 이상 사용하지 않는다.
+
+Alembic 마이그레이션은 `ALEMBIC_DATABASE_URL` (cm_admin 계정, DDL 권한) 환경변수를 사용한다.
+런타임 API 컨테이너에는 이 변수가 존재하지 않으며, 마이그레이션 환경(`MIGRATION_ENV_FILE`)에서만 주입된다.
 
 ## 구성
 

@@ -1,0 +1,5 @@
+# 스키마·인프라·파이프라인 변경은 소유자 리뷰 필수
+# branch protection의 "Require review from Code Owners"와 함께 동작한다 — 설정 방법은 docs/monorepo-cicd-runbook.md Section B 참조.
+/packages/db_schema/     @makerspaceSiwoo
+/terraform/              @makerspaceSiwoo
+/.github/workflows/      @makerspaceSiwoo
