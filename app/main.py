@@ -14,6 +14,7 @@ from sqlalchemy import text
 
 from app.auth.router import my_router, router as auth_router
 from app.cocktail.router import router as cocktail_router
+from app.explore.router import router as explore_router
 from app.core.config import get_settings
 from app.core.csrf import CSRFOriginMiddleware
 from app.core.database import engine
@@ -82,6 +83,7 @@ def create_app() -> FastAPI:
     app.add_middleware(CSRFOriginMiddleware, settings=settings)
 
     app.include_router(cocktail_router)
+    app.include_router(explore_router)
     app.include_router(auth_router)
     app.include_router(my_router)
     app.include_router(like_router)
