@@ -1,0 +1,24 @@
+-- 기존 볼륨의 부트스트랩 슈퍼유저(app_user)를 cm_admin으로 전환한다.
+-- (전환 순서 5단계, apply_roles.py보다 먼저 실행)
+--
+-- 부트스트랩 슈퍼유저는 DROP할 수 없고, 자기 자신은 RENAME할 수 없으므로
+-- 임시 슈퍼유저를 거쳐 RENAME한다. 비밀번호는 scram-sha-256이라 RENAME해도 유지되지만
+-- 어차피 로테이션이 목적이므로 새로 설정한다.
+--
+-- ⚠️ 실행 전 <PASSWORD_CM_ADMIN>을 20자+ 랜덤 값으로 치환: openssl rand -base64 24
+--
+-- 사용법 (OCI 인스턴스에서, 또는 5432 개방 후 로컬에서):
+--   1) psql -h <HOST> -U app_user -d cocktail_mate
+--        CREATE ROLE cm_bootstrap LOGIN SUPERUSER PASSWORD '<임시값>';
+--   2) psql -h <HOST> -U cm_bootstrap -d cocktail_mate
+--        ALTER ROLE app_user RENAME TO cm_admin;
+--        ALTER ROLE cm_admin PASSWORD '<PASSWORD_CM_ADMIN>';
+--   3) psql -h <HOST> -U cm_admin -d cocktail_mate
+--        DROP ROLE cm_bootstrap;
+--   4) 이어서 apply_roles.py 실행 (cm_admin DATABASE_URL로)
+--
+-- 참고: RENAME 방식이라 기존 테이블 소유권은 자동으로 cm_admin을 따라온다
+--       (REASSIGN OWNED 불필요).
+
+-- (위 절차를 단계별로 직접 실행 — 이 파일은 그대로 \i 하지 말 것:
+--  각 단계가 서로 다른 계정으로의 재접속을 요구한다)

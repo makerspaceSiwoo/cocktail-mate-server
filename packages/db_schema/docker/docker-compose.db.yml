@@ -1,0 +1,28 @@
+# OCI 인스턴스에서 PostgreSQL 단독 구동 (api-server 스택에서 DB 운영권 분리).
+#
+# - 볼륨은 기존 api-server 스택이 만든 cocktail-mate-server_postgres_data를 그대로 인계받는다
+#   (external). 따라서 POSTGRES_* 환경변수는 새 볼륨일 때만 초기화에 쓰이고,
+#   기존 볼륨에서는 무시된다 — 계정/비밀번호 변경은 scripts/ 의 SQL로 한다.
+# - 5432를 전체 바인딩: 개발자들이 .env의 공인 IP로 직접 접속한다 (보안 트레이드오프는
+#   README 참고 — 모든 계정 20자+ 랜덤 비밀번호 필수).
+# - init SQL 마운트는 두지 않는다. 스키마는 Alembic 책임.
+#
+# 실행: docker compose -f docker/docker-compose.db.yml up -d
+services:
+  db:
+    image: pgvector/pgvector:pg16
+    container_name: postgres-db
+    restart: always
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-cocktail_mate}
+      POSTGRES_USER: ${POSTGRES_USER:-cm_admin}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?.env에 설정 필요}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+volumes:
+  postgres_data:
+    external: true
+    name: cocktail-mate-server_postgres_data  # 기존 볼륨 인계
