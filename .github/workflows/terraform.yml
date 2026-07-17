@@ -79,4 +79,4 @@ jobs:
         run: terraform plan -var-file="$RUNNER_TEMP/terraform.tfvars.json" -no-color -out=tfplan
 
       - name: Terraform Apply
-        run: terraform apply -auto-approve tfplan
+        run: terraform apply -auto-approve -no-color tfplan
