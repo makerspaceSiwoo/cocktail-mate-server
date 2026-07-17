@@ -11,6 +11,9 @@ crash.*.log
 *.tfvars.json
 !*.tfvars.example
 
+# 렌더된 backend 설정(실제 S3 키 포함) — 커밋 금지 (example만 커밋)
+backend.hcl
+
 # API private key / 인증서 / 키 파일 (절대 커밋 금지)
 *.pem
 *.key
