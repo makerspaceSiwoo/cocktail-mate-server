@@ -1,0 +1,44 @@
+# OCI Object Storage — S3 호환 Terraform 원격 backend 설정 템플릿
+# 실제 값으로 채운 뒤 backend.hcl 로 저장하고 커밋하지 않는다 (.gitignore 에 backend.hcl 추가 권장).
+#
+# 사용법:
+#   terraform init -backend-config=backend.hcl
+#   (CI: TERRAFORM_BACKEND_CONFIG secret 으로 렌더링 후 주입)
+#
+# terraform >= 1.6 기준. OCI 네임스페이스/리전에 맞게 값을 수정한다.
+
+# ── 버킷 위치 ──────────────────────────────────────────────────────────────────
+# OCI 오브젝트 스토리지 버킷 이름 (사전에 콘솔/CLI 로 생성해야 함 — Category B 런북 참조)
+bucket = "<YOUR_BUCKET_NAME>"
+
+# state 파일 경로 (버킷 내 오브젝트 키)
+key = "terraform/oci/terraform.tfstate"
+
+# OCI 리전 식별자 (예: ap-chuncheon-1, ap-seoul-1, us-ashburn-1)
+region = "<YOUR_OCI_REGION>"
+
+# ── S3 호환 엔드포인트 ────────────────────────────────────────────────────────
+# OCI Object Storage S3 호환 엔드포인트
+# 형식: https://<namespace>.compat.objectstorage.<region>.oraclecloud.com
+endpoint = "https://<YOUR_NAMESPACE>.compat.objectstorage.<YOUR_OCI_REGION>.oraclecloud.com"
+
+# ── 인증 ─────────────────────────────────────────────────────────────────────
+# OCI Customer Secret Key (S3 호환 액세스 키)
+# OCI 콘솔 → 사용자 설정 → Customer Secret Keys 에서 생성
+access_key = "<YOUR_S3_ACCESS_KEY>"
+
+# OCI Customer Secret Key 시크릿 (생성 시 1회만 노출됨 — 안전하게 보관)
+secret_key = "<YOUR_S3_SECRET_KEY>"
+
+# ── OCI 전용 플래그 (Terraform S3 backend OCI 호환을 위해 필수) ───────────────
+# AWS SigV4 리전 검증 건너뜀 (OCI 리전은 AWS 리전이 아님)
+skip_region_validation      = true
+
+# AWS 자격증명 파일 확인 건너뜀 (OCI 인증 사용)
+skip_credentials_validation = true
+
+# AWS 메타데이터 API 요청 건너뜀
+skip_metadata_api_check     = true
+
+# AWS S3 강제 경로 스타일 사용 (OCI Object Storage 는 path-style 필요)
+force_path_style            = true

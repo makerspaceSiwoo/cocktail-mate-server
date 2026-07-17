@@ -1,0 +1,61 @@
+# =============================================================================
+#  terraform.tfvars 예시 파일
+# -----------------------------------------------------------------------------
+#  사용법 : cp terraform.tfvars.example terraform.tfvars  후 아래 값 채우기
+#  주의   : terraform.tfvars 는 .gitignore 처리됨 → 절대 커밋 금지 (실제 비밀값 포함)
+#
+#  보안 등급 표기
+#    🔴 HIGH   : 유출 시 계정/서버 탈취 가능. 파일 자체를 안전 보관.
+#    🟡 MEDIUM : 단독 유출로 즉시 피해는 적지만 계정 식별자 → 비공개 유지.
+#    🟢 LOW    : 공개되어도 무방.
+# =============================================================================
+
+
+# ---- OCI API 인증 (콘솔 ▸ 우상단 프로필 ▸ 내 프로필 ▸ API 키) -----------------
+# 이 4개 값으로 Terraform이 "당신 대신" Oracle API를 호출(서버/버킷 생성 등)한다.
+
+# 🟡 테넌시(=계정 전체) OCID. 콘솔 API키 추가 시 뜨는 "구성 파일 미리보기"의 tenancy 값.
+tenancy_ocid     = "ocid1.tenancy.oc1..xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+
+# 🟡 API 키를 등록한 사용자 OCID. 구성 파일 미리보기의 user 값.
+user_ocid        = "ocid1.user.oc1..xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+
+# 🟡 업로드한 공개키의 지문(식별자). 어떤 키로 서명했는지 매칭하는 용도(비밀번호 아님).
+#     구성 파일 미리보기의 fingerprint 값. 형식: 16바이트 콜론 구분 hex.
+fingerprint      = "aa:bb:cc:dd:ee:ff:00:11:22:33:44:55:66:77:88:99"
+
+# 🔴 *** 개인 키(PEM) 파일 경로 *** — 이 파일이 곧 "비밀번호".
+#     Terraform이 이 키로 API 요청에 서명한다. 파일 권한 600, 절대 git/공유 금지.
+#     아래는 경로만 가리킬 뿐, 키 내용은 이 tfvars에 넣지 않는다.
+private_key_path = "~/.oci/oci_api_key.pem"
+
+# 🟢 리전 식별자. 가입 시 고른 홈 리전. (예: 춘천 = ap-chuncheon-1, 서울 = ap-seoul-1)
+region           = "ap-chuncheon-1"
+
+
+# ---- 리소스를 생성할 컴파트먼트 ---------------------------------------------
+# 🟡 보통 테넌시 루트(=tenancy_ocid 와 동일 값)를 그대로 써도 된다.
+compartment_ocid = "ocid1.tenancy.oc1..xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+
+
+# ---- 인스턴스 SSH 접속용 *공개키* (API 키와 별개의 키쌍!) --------------------
+# 🟢 공개키는 공개되어도 안전. 서버 생성 시 ubuntu 사용자에 등록되어,
+#     당신의 SSH *개인키*(~/.ssh/...  🔴 비밀)로만 접속 가능해진다.
+#     값 얻기: cat ~/.ssh/cocktail_mate.pub   (없으면 ssh-keygen 먼저)
+#     반드시 "공개키 파일 내용 전체"를 한 줄로 붙여넣기.
+ssh_public_key = "ssh-ed25519 AAAAC3NzaC1lZDI1... your_name@your_mac"
+
+
+# ---- (보안) SSH 접속 허용 IP ------------------------------------------------
+# 🟡 미설정 시 전체(0.0.0.0/0) 허용. 본인 IP만 열려면 주석 해제 (curl ifconfig.me 로 확인).
+# ssh_allowed_cidr = "1.2.3.4/32"
+
+# ---- (선택·비용안전) 컴퓨트 크기 — Always Free 한도(합산 4 OCPU/24GB, 부트 200GB) ----
+# 미설정 시 기본 1 OCPU / 6GB / 부트 50GB (모두 무료). 한도 밖 값은 terraform 이 거부함.
+# instance_ocpus      = 1
+# instance_memory_gbs = 6
+# boot_volume_gbs     = 50
+# ubuntu_version      = "24.04"
+
+# ---- (선택) 이미지 버킷 이름 ------------------------------------------------
+# bucket_name = "cocktail-images"
