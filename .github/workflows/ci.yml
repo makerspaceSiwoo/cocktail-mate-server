@@ -11,6 +11,7 @@ jobs:
         with:
           python-version: '3.12'
       - run: pip install ruff
+      - run: ruff format --check .
       - run: ruff check .
       - run: python -m compileall -q app packages/db_schema/src
 
