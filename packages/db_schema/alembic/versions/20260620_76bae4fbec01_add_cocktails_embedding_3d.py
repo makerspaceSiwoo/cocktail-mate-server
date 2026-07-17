@@ -7,6 +7,7 @@ Create Date: 2026-06-20
 64D 유사도 임베딩을 3D로 축소한 시각화용 좌표(순수 추가). 풀 임베딩에서 파생.
 인덱스 없음(전체 조회해 그리는 용도라 ANN 불필요).
 """
+
 from typing import Sequence, Union
 
 import pgvector.sqlalchemy  # noqa: F401 — Vector 타입 렌더링에 필요

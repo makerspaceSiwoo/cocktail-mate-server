@@ -2,6 +2,7 @@
 
 (user_id, cocktail_id) 조합은 UNIQUE — 한 유저가 같은 칵테일을 중복 좋아요 불가.
 """
+
 from datetime import datetime
 
 from sqlalchemy import (
@@ -22,7 +23,9 @@ class Like(Base):
     __tablename__ = "likes"
     __table_args__ = (
         # 제약 이름은 운영 DB(inline UNIQUE의 PG 기본 이름)와 동일하게 유지
-        UniqueConstraint("user_id", "cocktail_id", name="likes_user_id_cocktail_id_key"),
+        UniqueConstraint(
+            "user_id", "cocktail_id", name="likes_user_id_cocktail_id_key"
+        ),
         Index("idx_likes_user", "user_id"),
         Index("idx_likes_cocktail", "cocktail_id"),
     )

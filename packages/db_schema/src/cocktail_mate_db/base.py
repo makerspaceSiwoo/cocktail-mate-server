@@ -2,6 +2,7 @@
 
 api-server는 `from cocktail_mate_db.base import Base`로 re-export해서 사용한다.
 """
+
 from sqlalchemy.orm import DeclarativeBase
 
 

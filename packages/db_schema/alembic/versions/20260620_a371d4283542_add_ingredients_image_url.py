@@ -6,6 +6,7 @@ Create Date: 2026-06-20
 
 재료 이미지 URL 추가(순수 추가). cocktails.image_url과 동일하게 text/nullable.
 """
+
 from typing import Sequence, Union
 
 import sqlalchemy as sa

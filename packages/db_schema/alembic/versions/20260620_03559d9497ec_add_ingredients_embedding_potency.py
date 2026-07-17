@@ -7,6 +7,7 @@ Create Date: 2026-06-20
 모델 학습에서 산출되는 재료 임베딩/강도 저장(순수 추가). cocktails와 동일 차원(64).
 인덱스 없음(저장 용도). 둘 다 학습 전 NULL.
 """
+
 from typing import Sequence, Union
 
 import pgvector.sqlalchemy  # noqa: F401 — Vector 타입 렌더링에 필요
@@ -26,7 +27,9 @@ _EMBEDDING_DIM = 64
 def upgrade() -> None:
     op.add_column(
         "ingredients",
-        sa.Column("embedding", pgvector.sqlalchemy.Vector(_EMBEDDING_DIM), nullable=True),
+        sa.Column(
+            "embedding", pgvector.sqlalchemy.Vector(_EMBEDDING_DIM), nullable=True
+        ),
     )
     op.add_column("ingredients", sa.Column("potency", sa.Float(), nullable=True))
 

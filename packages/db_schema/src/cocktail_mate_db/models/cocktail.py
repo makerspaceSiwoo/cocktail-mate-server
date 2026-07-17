@@ -6,6 +6,7 @@
 
 [기능 1] 칵테일 유사도 임베딩 + ANN(HNSW cosine) 범위. 기능 2(맛/향 패싯)는 별도 테이블로 추후 추가.
 """
+
 from datetime import datetime
 
 from pgvector.sqlalchemy import Vector
@@ -93,7 +94,9 @@ class Cocktail(Base):
     # 임베딩을 3D로 축소한 시각화용 좌표(구 배치). 풀 임베딩에서 파생, 학습 전 NULL.
     embedding_3d: Mapped[list[float] | None] = mapped_column(Vector(3))
     # 임베딩 마지막 갱신 시각(재학습 추적). 학습 전 NULL.
-    embedding_updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    embedding_updated_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True)
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
@@ -160,7 +163,9 @@ class CocktailIngredient(Base):
     )
     # numeric(8,3) (0.5/1.5/2 dash 등). "to taste"/presence-only는 NULL(학습 시 수량 1). Python float.
     amount: Mapped[float | None] = mapped_column(Numeric(8, 3, asdecimal=False))
-    unit: Mapped[str | None] = mapped_column(String(50))  # 'ml','oz','dash'... presence-only는 NULL
+    unit: Mapped[str | None] = mapped_column(
+        String(50)
+    )  # 'ml','oz','dash'... presence-only는 NULL
 
     cocktail: Mapped["Cocktail"] = relationship(back_populates="ingredients")
     ingredient: Mapped["Ingredient"] = relationship()

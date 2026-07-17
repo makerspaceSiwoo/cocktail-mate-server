@@ -6,6 +6,7 @@ Create Date: 2026-06-20
 
 ingredients.embedding/potency 추가를 취소. (앞으로 가는 drop 마이그레이션으로 되돌림)
 """
+
 from typing import Sequence, Union
 
 import pgvector.sqlalchemy  # noqa: F401 — downgrade의 Vector 타입 렌더링에 필요
@@ -29,6 +30,8 @@ def upgrade() -> None:
 def downgrade() -> None:
     op.add_column(
         "ingredients",
-        sa.Column("embedding", pgvector.sqlalchemy.Vector(_EMBEDDING_DIM), nullable=True),
+        sa.Column(
+            "embedding", pgvector.sqlalchemy.Vector(_EMBEDDING_DIM), nullable=True
+        ),
     )
     op.add_column("ingredients", sa.Column("potency", sa.Float(), nullable=True))

@@ -10,6 +10,7 @@ Create Date: 2026-06-23
 - ingredients: embedding vector(32) + potency(float) 추가(앞서 f69f4c69e99d 에서 drop했던 것을 32D로 재도입).
   재료 임베딩은 칵테일 임베딩의 구성 단위(저장 용도, ANN 인덱스 없음). 둘 다 학습 전/비-맛 재료는 NULL.
 """
+
 from typing import Sequence, Union
 
 import pgvector.sqlalchemy  # noqa: F401 — Vector 타입 렌더링에 필요

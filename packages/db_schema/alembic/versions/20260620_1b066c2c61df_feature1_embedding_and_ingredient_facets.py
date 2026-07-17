@@ -10,6 +10,7 @@ Create Date: 2026-06-20
 대상: ingredients / cocktails / cocktail_ingredients.
 변경 제외: users, likes, alembic_version.
 """
+
 from typing import Sequence, Union
 
 import pgvector.sqlalchemy  # noqa: F401 — Vector 타입 렌더링에 필요
@@ -33,8 +34,12 @@ _ABV_CHECK = "abv IS NULL OR (abv >= 0 AND abv <= 100)"
 
 def upgrade() -> None:
     # --- ingredients: category + abv(도수 %) 추가 ---
-    op.add_column("ingredients", sa.Column("category", sa.String(length=50), nullable=True))
-    op.add_column("ingredients", sa.Column("abv", sa.Numeric(precision=4, scale=1), nullable=True))
+    op.add_column(
+        "ingredients", sa.Column("category", sa.String(length=50), nullable=True)
+    )
+    op.add_column(
+        "ingredients", sa.Column("abv", sa.Numeric(precision=4, scale=1), nullable=True)
+    )
     op.create_check_constraint("chk_ingredients_abv", "ingredients", _ABV_CHECK)
 
     # --- cocktails ---

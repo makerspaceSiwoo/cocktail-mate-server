@@ -6,6 +6,7 @@ Create Date: 2026-06-20
 
 재료 설명 컬럼 추가(순수 추가). cocktails.description과 동일하게 text/nullable.
 """
+
 from typing import Sequence, Union
 
 import sqlalchemy as sa

@@ -9,6 +9,7 @@ Create Date: 2026-06-20
 - ingredients.name_en citext NULL UNIQUE   (영문 검색 + 외부 dedup 키)
 대소문자 무시 정확 매칭을 위해 citext 확장 사용.
 """
+
 from typing import Sequence, Union
 
 import sqlalchemy as sa
@@ -31,7 +32,9 @@ def upgrade() -> None:
     op.create_index("idx_cocktails_name", "cocktails", ["name"], unique=False)
 
     # --- ingredients ---
-    op.add_column("ingredients", sa.Column("name_en", postgresql.CITEXT(), nullable=True))
+    op.add_column(
+        "ingredients", sa.Column("name_en", postgresql.CITEXT(), nullable=True)
+    )
     op.create_unique_constraint("uq_ingredients_name_en", "ingredients", ["name_en"])
     op.create_index("idx_ingredients_name", "ingredients", ["name"], unique=False)
 

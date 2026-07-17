@@ -15,6 +15,7 @@ URL 우선순위:
   DATABASE_URL          — 로컬 단일 URL 폴백 (없으면 admin_url 접근 시 에러)
   런타임 API의 DATABASE_URL(cm_app)은 서버 .env에만 존재하고 여기에 없다.
 """
+
 from __future__ import annotations
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -22,9 +23,9 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
-        env_file=".env",            # 실행 디렉터리의 .env를 읽음 (env 변수가 우선)
+        env_file=".env",  # 실행 디렉터리의 .env를 읽음 (env 변수가 우선)
         env_file_encoding="utf-8",
-        extra="ignore",             # POSTGRES_* 등 docker-compose 전용 변수는 무시
+        extra="ignore",  # POSTGRES_* 등 docker-compose 전용 변수는 무시
     )
 
     # cm_admin 접속 문자열 — alembic / 스키마 생성 / apply_roles 전용 (DDL 권한).

@@ -6,6 +6,7 @@ Create Date: 2026-06-20
 
 cocktail_ingredients.role 제거. (가니시/데코 구분 컬럼 — 사용 중단)
 """
+
 from typing import Sequence, Union
 
 import sqlalchemy as sa

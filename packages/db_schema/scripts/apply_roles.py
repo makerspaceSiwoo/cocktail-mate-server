@@ -13,6 +13,7 @@ cm_dml에서 쓰기 권한을 회수해 **읽기 전용**으로 둔다(아래 GR
     python scripts/apply_roles.py
 재실행해도 안전(계정이 있으면 비밀번호만 갱신, 권한은 멱등).
 """
+
 import sys
 
 import psycopg2
@@ -64,13 +65,19 @@ def main() -> None:
         ):
             cur.execute("SELECT 1 FROM pg_roles WHERE rolname = %s", (role,))
             exists = cur.fetchone() is not None
-            verb = "ALTER ROLE {} WITH LOGIN PASSWORD {}" if exists else "CREATE ROLE {} LOGIN PASSWORD {}"
+            verb = (
+                "ALTER ROLE {} WITH LOGIN PASSWORD {}"
+                if exists
+                else "CREATE ROLE {} LOGIN PASSWORD {}"
+            )
             cur.execute(sql.SQL(verb).format(sql.Identifier(role), sql.Literal(pw)))
             print(f"  {'updated' if exists else 'created'} role {role}")
         cur.execute(GRANTS)
     conn.close()
     print("✅ 계정/권한 적용 완료 (cm_app, cm_dml)")
-    print("   ↳ cm_dml: cocktails/ingredients/cocktail_ingredients 는 읽기 전용(존재 시)")
+    print(
+        "   ↳ cm_dml: cocktails/ingredients/cocktail_ingredients 는 읽기 전용(존재 시)"
+    )
 
 
 if __name__ == "__main__":
