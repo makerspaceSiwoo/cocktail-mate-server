@@ -1,7 +1,10 @@
 name: Deploy api-server to OCI
 
+# CI must pass before merge to main — enforced by branch protection required
+# status checks (see runbook), so any commit on main already passed CI.
+#
 # main push마다: ① GitHub Actions에서 api/caddy 이미지를 빌드해 GHCR에 push
-#               ② OCI 서버는 pull + up 만 (서버에서 빌드 X → 인스턴스 과부하/네트워크 문제 회피)
+#               ② OCI 서버는 pull + migrate + up 만 (서버에서 빌드 X → 인스턴스 과부하/네트워크 문제 회피)
 on:
   push:
     branches: [main]
@@ -19,6 +22,7 @@ jobs:
   # ── ① 빌드 & GHCR push ──
   # OCI가 ARM이라 arm64 이미지 필요 → 네이티브 ARM 러너에서 빌드(에뮬레이션 X, 빠름).
   # ubuntu-24.04-arm 은 public 레포 무료 제공.
+  # db 패키지는 로컬 monorepo(packages/db_schema) → ssh/Deploy Key 불필요.
   build:
     runs-on: ubuntu-24.04-arm
     permissions:
@@ -26,11 +30,6 @@ jobs:
       packages: write
     steps:
       - uses: actions/checkout@v4
-
-      # private 패키지(cocktail-mate-db) 설치용 Deploy Key를 ssh-agent에 로드
-      - uses: webfactory/ssh-agent@v0.9.0
-        with:
-          ssh-private-key: ${{ secrets.CMDB_DEPLOY_KEY }}
 
       - uses: docker/setup-buildx-action@v3
 
@@ -45,7 +44,6 @@ jobs:
         with:
           context: .
           platforms: linux/arm64   # OCI 인스턴스가 ARM
-          ssh: default          # cocktail-mate-db(private) 설치
           push: true
           tags: |
             ${{ env.API_IMAGE }}:latest
@@ -61,7 +59,7 @@ jobs:
             ${{ env.CADDY_IMAGE }}:latest
             ${{ env.CADDY_IMAGE }}:${{ github.sha }}
 
-  # ── ② OCI 서버에 SSH → pull + up (헬스 실패 시 직전 이미지로 롤백) ──
+  # ── ② OCI 서버에 SSH → .env 업로드 → migrate → pull + up (헬스 실패 시 직전 이미지로 롤백) ──
   deploy:
     needs: build
     runs-on: ubuntu-latest
@@ -69,23 +67,44 @@ jobs:
       contents: read
       packages: read
     steps:
-      - name: SSH 배포 (pull + up)
+      - name: SSH 배포 (.env upload → alembic migrate → compose up)
         uses: appleboy/ssh-action@v1.2.0
         with:
           host: ${{ secrets.OCI_HOST }}
           username: ${{ secrets.OCI_USER }}
           key: ${{ secrets.OCI_SSH_KEY }}
-          envs: GHCR_USER,GHCR_TOKEN,API_IMAGE,CADDY_IMAGE,SHA
+          envs: GHCR_USER,GHCR_TOKEN,API_IMAGE,CADDY_IMAGE,SHA,APP_ENV_FILE,MIGRATION_ENV_FILE
           command_timeout: 10m
           script: |
             set -e
             cd ~/cocktail-mate-server
-            git fetch origin && git checkout main && git reset --hard origin/main   # compose/Caddyfile만 최신화 (.env 보존)
+
+            # 1. compose/Caddyfile 최신화 (.env は保존)
+            git fetch origin && git checkout main && git reset --hard origin/main
+
+            # 2. 런타임 .env 업로드 (cm_app, DDL 권한 없음 — API 컨테이너가 읽는 파일)
+            printf '%s' "$APP_ENV_FILE" > .env && chmod 600 .env
+
+            # 3. GHCR 로그인
             echo "$GHCR_TOKEN" | sudo docker login ghcr.io -u "$GHCR_USER" --password-stdin
+
+            # 4. 이미지 pull
             PREV_API=$(sudo docker inspect --format '{{.Config.Image}}' fastapi-server 2>/dev/null || echo "")
             API_TAG="${API_IMAGE}:${SHA}"; CADDY_TAG="${CADDY_IMAGE}:${SHA}"
             sudo API_IMAGE="$API_TAG" CADDY_IMAGE="$CADDY_TAG" docker compose -f docker-compose.prod.yml pull
+
+            # 5. 마이그레이션 전용 env 파일 (cm_admin, ALEMBIC_DATABASE_URL 포함 — API 컨테이너에는 절대 노출 X)
+            printf '%s' "$MIGRATION_ENV_FILE" > /tmp/cm_migration.env && chmod 600 /tmp/cm_migration.env
+
+            # 6. Alembic 마이그레이션 (one-off 컨테이너) — 실패 시 set -e 가 즉시 중단해 API up 이 실행되지 않는다
+            sudo docker run --rm --env-file /tmp/cm_migration.env \
+              --add-host=host.docker.internal:host-gateway \
+              "$API_TAG" sh -c 'cd packages/db_schema && alembic upgrade head'
+            rm -f /tmp/cm_migration.env
+
+            # 7. API + Caddy 기동
             sudo API_IMAGE="$API_TAG" CADDY_IMAGE="$CADDY_TAG" docker compose -f docker-compose.prod.yml up -d
+
             # api는 expose(내부)만 — 호스트 localhost:8000은 안 열림 → 컨테이너 내부에서 확인.
             # 기동 시간 고려해 최대 ~30초 재시도.
             ok=0
@@ -96,9 +115,9 @@ jobs:
               sleep 5
             done
             if [ "$ok" = 1 ]; then
-              echo "✅ 배포 성공 (api /health 200)"
+              echo "배포 성공 (api /health 200)"
             else
-              echo "❌ 헬스 실패 → 직전 이미지로 롤백: ${PREV_API:-(없음)}"
+              echo "헬스 실패 -> 직전 이미지로 롤백: ${PREV_API:-(없음)}"
               if [ -n "$PREV_API" ]; then
                 sudo API_IMAGE="$PREV_API" CADDY_IMAGE="$CADDY_TAG" docker compose -f docker-compose.prod.yml up -d
               fi
@@ -111,3 +130,5 @@ jobs:
           API_IMAGE: ${{ env.API_IMAGE }}
           CADDY_IMAGE: ${{ env.CADDY_IMAGE }}
           SHA: ${{ github.sha }}
+          APP_ENV_FILE: ${{ secrets.APP_ENV_FILE }}
+          MIGRATION_ENV_FILE: ${{ secrets.MIGRATION_ENV_FILE }}
