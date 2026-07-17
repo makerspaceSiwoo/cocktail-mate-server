@@ -1,13 +1,15 @@
-name: Deploy api-server to OCI
+name: Deploy api-server (main→OCI | develop→Render)
 
 # CI must pass before merge to main — enforced by branch protection required
 # status checks (see runbook), so any commit on main already passed CI.
 #
-# main push마다: ① GitHub Actions에서 api/caddy 이미지를 빌드해 GHCR에 push
-#               ② OCI 서버는 pull + migrate + up 만 (서버에서 빌드 X → 인스턴스 과부하/네트워크 문제 회피)
+# main push마다:   ① GitHub Actions에서 api/caddy 이미지를 빌드해 GHCR에 push (arm64, OCI)
+#                  ② OCI 서버는 pull + migrate + up 만 (서버에서 빌드 X → 인스턴스 과부하/네트워크 문제 회피)
+# develop push마다: ① amd64 api 이미지를 빌드해 GHCR에 push
+#                   ② develop DB migrate → Render 환경변수 동기화 → deploy hook → health check
 on:
   push:
-    branches: [main]
+    branches: [main, develop]
   workflow_dispatch: {}
 
 concurrency:
@@ -19,11 +21,12 @@ env:
   CADDY_IMAGE: ghcr.io/makerspacesiwoo/cocktail-mate-caddy
 
 jobs:
-  # ── ① 빌드 & GHCR push ──
+  # ── ① [main] 빌드 & GHCR push (arm64 / OCI) ──
   # OCI가 ARM이라 arm64 이미지 필요 → 네이티브 ARM 러너에서 빌드(에뮬레이션 X, 빠름).
   # ubuntu-24.04-arm 은 public 레포 무료 제공.
   # db 패키지는 로컬 monorepo(packages/db_schema) → ssh/Deploy Key 불필요.
   build:
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-24.04-arm
     permissions:
       contents: read
@@ -59,8 +62,9 @@ jobs:
             ${{ env.CADDY_IMAGE }}:latest
             ${{ env.CADDY_IMAGE }}:${{ github.sha }}
 
-  # ── ② OCI 서버에 SSH → .env 업로드 → migrate → pull + up (헬스 실패 시 직전 이미지로 롤백) ──
+  # ── ② [main] OCI 서버에 SSH → .env 업로드 → migrate → pull + up (헬스 실패 시 직전 이미지로 롤백) ──
   deploy:
+    if: github.ref == 'refs/heads/main'
     needs: build
     runs-on: ubuntu-latest
     permissions:
@@ -133,3 +137,154 @@ jobs:
           SHA: ${{ github.sha }}
           APP_ENV_FILE: ${{ secrets.APP_ENV_FILE }}
           MIGRATION_ENV_FILE: ${{ secrets.MIGRATION_ENV_FILE }}
+
+  # ── ③ [develop] 빌드 & GHCR push (amd64 / Render) ──
+  # Render는 amd64 → linux/amd64 이미지. CADDY 불필요(Render가 TLS 처리).
+  # db 패키지는 로컬 monorepo → ssh/Deploy Key 불필요.
+  build-develop:
+    if: github.ref == 'refs/heads/develop'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build & push api 이미지 (amd64 — Render)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64
+          push: true
+          tags: |
+            ${{ env.API_IMAGE }}:develop
+            ${{ env.API_IMAGE }}:${{ github.sha }}
+
+  # ── ④ [develop] develop DB migrate → Render 환경변수 동기화 → deploy hook → health ──
+  # 순서: migrate BEFORE deploy (constraints.md "Deploy order (always)" 준수).
+  # environment: develop — RENDER_* + APP_ENV_FILE + ALEMBIC_DATABASE_URL 시크릿 보유.
+  deploy-develop:
+    if: github.ref == 'refs/heads/develop'
+    needs: build-develop
+    runs-on: ubuntu-latest
+    environment: develop
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: pip install db_schema[migrations]
+        run: pip install -e ./packages/db_schema[migrations]
+
+      # Step 1: develop DB 마이그레이션 — 실패 시 이후 단계 전체 중단 (set -e)
+      - name: Alembic migrate (develop DB)
+        working-directory: packages/db_schema
+        env:
+          ALEMBIC_DATABASE_URL: ${{ secrets.ALEMBIC_DATABASE_URL }}
+        run: alembic upgrade head
+
+      # Step 2: Render 환경변수 동기화 (runtime, cm_app)
+      # - APP_ENV_FILE(dotenv) → JSON 배열([{key,value}]) 변환 후 Render API PUT
+      # - 값은 절대 echo/print하지 않음; printf로 파일에만 씀; trap EXIT으로 정리 보장
+      # - PUT /v1/services/{id}/env-vars: 확인된 Render 공식 docs (api-docs.render.com)
+      - name: Sync Render env vars
+        env:
+          APP_ENV_FILE: ${{ secrets.APP_ENV_FILE }}
+          RENDER_API_KEY: ${{ secrets.RENDER_API_KEY }}
+          RENDER_SERVICE_ID: ${{ secrets.RENDER_SERVICE_ID }}
+        run: |
+          set -euo pipefail
+          APP_ENV="$RUNNER_TEMP/app.env"
+          RENDER_JSON="$RUNNER_TEMP/render-env.json"
+          trap 'rm -f "$APP_ENV" "$RENDER_JSON"' EXIT
+
+          # 값 노출 없이 파일에만 기록 (printf는 shell expansion 없음)
+          printf '%s' "$APP_ENV_FILE" > "$APP_ENV"
+          chmod 600 "$APP_ENV"
+
+          # dotenv(KEY=VALUE 또는 KEY="VALUE") → Render JSON array [{"key":...,"value":...}]
+          # python이 파일을 읽어 변환 — 값을 터미널/로그에 출력하지 않음
+          python3 - "$APP_ENV" "$RENDER_JSON" <<'PYEOF'
+          import sys, json, re
+
+          env_path, out_path = sys.argv[1], sys.argv[2]
+          pairs = []
+          with open(env_path) as f:
+              for raw in f:
+                  line = raw.strip()
+                  if not line or line.startswith('#'):
+                      continue
+                  m = re.match(r'^([A-Za-z_][A-Za-z0-9_]*)=(.*)', line)
+                  if not m:
+                      continue
+                  key = m.group(1)
+                  val = m.group(2)
+                  # strip surrounding quotes
+                  if len(val) >= 2 and val[0] == val[-1] and val[0] in ('"', "'"):
+                      val = val[1:-1]
+                  pairs.append({"key": key, "value": val})
+          with open(out_path, 'w') as f:
+              json.dump(pairs, f)
+          PYEOF
+          chmod 600 "$RENDER_JSON"
+
+          # Render API: PUT /v1/services/{serviceId}/env-vars
+          # 확인 출처: https://api-docs.render.com/reference/update-env-vars-for-service.md
+          # Authorization 헤더 값은 Actions 마스킹으로 로그에 노출되지 않음
+          curl -fsS -X PUT \
+            "https://api.render.com/v1/services/${RENDER_SERVICE_ID}/env-vars" \
+            -H "Authorization: Bearer ${RENDER_API_KEY}" \
+            -H "Content-Type: application/json" \
+            --data-binary "@${RENDER_JSON}" \
+            -o /dev/null
+
+      # Step 3: Render deploy hook — 특정 이미지 태그로 배포 (imgURL 파라미터)
+      # imgURL 파라미터명 확인: https://render.com/docs/deploy-hooks
+      # 훅 URL에 이미 ? 가 포함될 수 있으므로 & 로 연결; imgURL은 git SHA 태그 사용
+      - name: Trigger Render deploy hook
+        env:
+          RENDER_DEPLOY_HOOK_URL: ${{ secrets.RENDER_DEPLOY_HOOK_URL }}
+          API_IMAGE: ${{ env.API_IMAGE }}
+        run: |
+          set -euo pipefail
+          # imgURL을 쿼리 파라미터로 추가 (훅 URL 형태에 따라 ? or & 자동 선택)
+          if echo "$RENDER_DEPLOY_HOOK_URL" | grep -q '?'; then
+            HOOK="${RENDER_DEPLOY_HOOK_URL}&imgURL=${API_IMAGE}:${{ github.sha }}"
+          else
+            HOOK="${RENDER_DEPLOY_HOOK_URL}?imgURL=${API_IMAGE}:${{ github.sha }}"
+          fi
+          curl -fsS "$HOOK" -o /dev/null
+
+      # Step 4: Render 헬스 체크 — cold start 고려해 최대 3분 대기 (12 × 15s)
+      - name: Health check (RENDER_HEALTH_URL)
+        env:
+          RENDER_HEALTH_URL: ${{ secrets.RENDER_HEALTH_URL }}
+        run: |
+          set -euo pipefail
+          ok=0
+          for i in $(seq 1 12); do
+            status=$(curl -fsS -o /dev/null -w "%{http_code}" "$RENDER_HEALTH_URL" || true)
+            if [ "$status" = "200" ]; then
+              echo "Health OK ($i/12)"
+              ok=1
+              break
+            fi
+            echo "Attempt $i/12: status=${status:-ERR}, retrying in 15s…"
+            sleep 15
+          done
+          if [ "$ok" != "1" ]; then
+            echo "Health check failed after 12 attempts (3 min). Deploy may have failed."
+            exit 1
+          fi
