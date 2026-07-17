@@ -24,7 +24,7 @@ Create two environments in **Settings → Environments**:
 | Secret name | Content |
 |---|---|
 | `APP_ENV_FILE` | Full dotenv content for the **API runtime** container (`cm_app` role). Every key in `.env.example` must be present. `DATABASE_URL` must use the `cm_app` role (no DDL). |
-| `MIGRATION_ENV_FILE` | Dotenv containing `ALEMBIC_DATABASE_URL=postgresql+psycopg2://cm_admin:<password>@host.docker.internal:5432/cocktail_mate` (and any other keys the migration env needs). The `cm_admin` credential stays here — never in `APP_ENV_FILE`. |
+| `MIGRATION_ENV_FILE` | Dotenv containing `ALEMBIC_DATABASE_URL` = cm_admin 접속 URL (형식은 `packages/db_schema/.env.example` 참고) 및 migration env에 필요한 기타 키. The `cm_admin` credential stays here — never in `APP_ENV_FILE`. |
 | `OCI_HOST` | Public IP of the OCI compute instance |
 | `OCI_USER` | SSH login user on the OCI instance (e.g. `ubuntu`) |
 | `OCI_SSH_KEY` | Private key whose public counterpart is in `~/.ssh/authorized_keys` on the instance |
@@ -100,9 +100,14 @@ cp terraform/oci/backend.hcl.example terraform/oci/backend.hcl
 # Edit backend.hcl with real bucket name, namespace, region, user OCID, key fingerprint, key path
 
 cd terraform/oci
-terraform init -backend-config=backend.hcl -migrate-state \
-  -migrate-state-from=../../cocktail-mate-db/infra/oracle/terraform/terraform.tfstate
+# 1) 레거시 로컬 state를 작업 디렉터리로 복사 (terraform init 이 이 파일을 원격 backend로 이관한다)
+cp ../../cocktail-mate-db/infra/oracle/terraform/terraform.tfstate terraform/oci/terraform.tfstate
+cd terraform/oci
+# 2) 원격 backend로 init + state 이관 (프롬프트에 yes)
+terraform init -backend-config=<렌더된 backend.hcl> -migrate-state
 ```
+
+> **CAUTION:** 이관 완료 및 `terraform import`(C3) 후, `terraform plan`을 실행해 `0 to destroy / 0 to replace` 임을 반드시 확인한 뒤에만 apply를 진행하십시오 (C4 게이트 참고).
 
 > **Note:** After this, local `terraform init` (without `-backend-config`) will fail. Either supply
 > `-backend-config=backend.hcl` or use `-backend=false` for offline validation only.
