@@ -329,6 +329,15 @@ POSTGRES_PASSWORD=<cm_admin 비번>
 cd ~/cocktail-mate-db
 docker compose -f docker/docker-compose.db.yml down
 # external 볼륨은 down으로 삭제되지 않음 — 데이터 유지 확인됨
+# ~/cocktail-mate-db 클론이 없거나 경로가 바뀌었으면: docker stop postgres-db && docker rm postgres-db (컨테이너만 제거, external 볼륨은 유지)
+```
+
+### 기동 전 포트 점유 확인
+
+```bash
+# 5432 포트가 이미 사용 중이면 위의 stop/rm을 다시 실행
+docker ps --filter publish=5432 --format '{{.Names}}'
+# → postgres-db 가 출력되면 위의 stop/rm을 먼저 실행
 ```
 
 ### server 레포로 기동
