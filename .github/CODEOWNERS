@@ -3,3 +3,4 @@
 /packages/db_schema/     @makerspaceSiwoo
 /terraform/              @makerspaceSiwoo
 /.github/workflows/      @makerspaceSiwoo
+/docker-compose.db.yml   @makerspaceSiwoo

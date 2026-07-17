@@ -284,4 +284,83 @@ These items were noted during code review but are not blocking the first deploy.
 
 ---
 
-*Runbook synthesized from Tasks 6–8b. Last updated: 2026-07-17.*
+## I. DB compose 운영권 OCI 이전 (무중단 인계 절차)
+
+> **언제 실행하는가:** `cocktail-mate-db` 클론이 DB 스택을 구동 중인 OCI 인스턴스에서,
+> 운영 주체를 `cocktail-mate-server`로 전환할 때 **수동으로 1회** 실행한다.
+>
+> **왜 데이터 손실이 없는가:** `docker-compose.db.yml`의 볼륨이 `external: true`,
+> `name: cocktail-mate-server_postgres_data`로 선언되어 있다.
+> external 볼륨은 `docker compose down`으로도 삭제되지 않으며, 이름이 고정되어 있어
+> 실행 위치가 바뀌어도 항상 동일한 볼륨에 붙는다.
+
+### 사전 확인 (데이터 보존 근거)
+
+```bash
+# 볼륨이 현재 존재하는지 확인
+docker volume ls | grep postgres
+# → cocktail-mate-server_postgres_data 가 목록에 있어야 함
+
+# 컨테이너가 이 볼륨을 실제로 쓰는지 확인
+docker inspect postgres-db --format '{{range .Mounts}}{{.Name}}{{end}}'
+# → cocktail-mate-server_postgres_data 출력되면 OK
+```
+
+### DB 전용 env 준비 (API `.env`와 완전히 별개)
+
+OCI 호스트에 `~/cocktail-mate-server/.env.db` 를 생성한다:
+
+```
+POSTGRES_DB=cocktail_mate
+POSTGRES_USER=cm_admin
+POSTGRES_PASSWORD=<cm_admin 비번>
+```
+
+> ⚠️ **절대 섞지 말 것:** deploy.yml은 API용 `.env`(cm_app 계정)를 자동으로 덮어쓴다.
+> DB 전용 env는 반드시 `.env.db`처럼 별도 파일을 쓰고, 기동 시 `--env-file .env.db`를 명시해야 한다.
+> compose가 자동 로드하는 `.env`(API env)와 혼동하면 DB에 잘못된 계정/비밀번호가 전달될 수 있다.
+>
+> (기존 볼륨이 이미 초기화되어 있다면 POSTGRES_* 환경변수는 초기화에 사용되지 않고 무시된다.
+> 새 볼륨일 때만 초기화에 쓰인다.)
+
+### 옛 실행 주체 정지
+
+```bash
+cd ~/cocktail-mate-db
+docker compose -f docker/docker-compose.db.yml down
+# external 볼륨은 down으로 삭제되지 않음 — 데이터 유지 확인됨
+```
+
+### server 레포로 기동
+
+```bash
+cd ~/cocktail-mate-server
+git checkout main && git pull
+docker compose --env-file .env.db -f docker-compose.db.yml up -d
+```
+
+### 검증
+
+```bash
+# 컨테이너 및 DB 응답 확인
+docker exec postgres-db pg_isready -U cm_admin
+
+# API 헬스체크 (db: ok 확인)
+curl http://localhost:8000/health   # OCI 내부; 또는 공인 IP/health
+
+# 핵심 테이블 row 수가 이전과 동일한지 확인 (예)
+docker exec postgres-db psql -U cm_admin -d cocktail_mate -c "SELECT COUNT(*) FROM cocktails;"
+```
+
+### (선택) 정리
+
+검증이 완료되면 `~/cocktail-mate-db` 클론은 더 이상 DB 구동에 필요하지 않다 (삭제 가능).
+
+> **참고 — postgres는 수동 운영 전용:**
+> postgres 컨테이너는 stateful하므로 CI/deploy.yml이 관리하지 않는다.
+> 위 절차는 **수동 1회 이전**이며, 이후에도 DB는 수동으로 운영한다.
+> deploy.yml은 API(FastAPI) + Caddy 컨테이너만 pull/up한다.
+
+---
+
+*Runbook synthesized from Tasks 6–8b, 10. Last updated: 2026-07-17.*

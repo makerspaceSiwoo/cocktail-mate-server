@@ -7,7 +7,7 @@
 #   README 참고 — 모든 계정 20자+ 랜덤 비밀번호 필수).
 # - init SQL 마운트는 두지 않는다. 스키마는 Alembic 책임.
 #
-# 실행: docker compose -f docker/docker-compose.db.yml up -d
+# 실행: docker compose -f docker-compose.db.yml up -d
 services:
   db:
     image: pgvector/pgvector:pg16
