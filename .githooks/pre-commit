@@ -1,7 +1,29 @@
 #!/bin/sh
-# 커밋 전: 브랜치명 검증
+# 커밋 전: ① 스테이징된 Python 파일 자동 포맷(ruff) ② 브랜치명 검증
 # 활성화: make hooks  (git config core.hooksPath .githooks)
 
+# ── 1) 스테이징된 .py 자동 포맷 (ruff format + check --fix 후 재스테이징) ──
+# make format 과 동일한 도구를 쓰되, 전체 repo 가 아니라 "이번 커밋에 담긴 .py" 만 대상으로 한다.
+# (전체 포맷은 관계없는 작업 트리 변경까지 커밋에 끌어들일 수 있어 위험.)
+if [ -x .venv/bin/ruff ]; then RUFF=".venv/bin/ruff";
+elif command -v ruff >/dev/null 2>&1; then RUFF="ruff";
+else RUFF=""; fi
+
+if [ -n "$RUFF" ]; then
+  # 추가(A)/복사(C)/수정(M)된 스테이징 .py 파일만 (삭제/이름변경 제외)
+  staged_py=$(git diff --cached --name-only --diff-filter=ACM -- '*.py')
+  if [ -n "$staged_py" ]; then
+    echo "🎨 pre-commit: ruff format (스테이징된 .py)"
+    # 포맷/오토픽스는 커밋을 막지 않는다(|| true). 남는 lint 오류는 pre-push 훅이 잡는다.
+    printf '%s\n' "$staged_py" | xargs "$RUFF" format || true
+    printf '%s\n' "$staged_py" | xargs "$RUFF" check --fix || true
+    printf '%s\n' "$staged_py" | xargs git add
+  fi
+else
+  echo "⚠️ ruff 없음 — 자동 포맷 건너뜀 ('pip install -r requirements-dev.txt' 후 재시도)"
+fi
+
+# ── 2) 브랜치명 검증 ──
 branch=$(git rev-parse --abbrev-ref HEAD)
 pattern='^(main|develop|(feat|fix|hotfix|chore|docs|refactor|test|other)/[a-z0-9._-]+)$'
 
