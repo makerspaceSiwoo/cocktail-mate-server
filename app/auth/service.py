@@ -130,15 +130,15 @@ class AuthService:
 
     # ── 닉네임 변경 ──────────────────────────────────────────
     def change_nickname(
-            self,
-            db: Session,
-            user: User,
-            nickname: str,
+        self,
+        db: Session,
+        user: User,
+        nickname: str,
     ) -> User:
         """현재 로그인한 사용자의 닉네임을 변경한다."""
         if user.nickname == nickname:
             return user
-        
+
         try:
             updated_user = self.repository.update_nickname(
                 db,

@@ -26,6 +26,7 @@ class MessageResponse(BaseModel):
 
 class NicknameChangeRequest(BaseModel):
     """닉네임 변경 요청 스키마."""
+
     nickname: str
 
     @field_validator("nickname")
@@ -34,10 +35,13 @@ class NicknameChangeRequest(BaseModel):
         value = value.strip()
         if len(value) < 2 or len(value) > 10:
             raise ValueError("닉네임은 2~10자여야 합니다.")
-        if re.fullmatch(
-            r"^[가-힣a-zA-Z0-9]+([-_][가-힣a-zA-Z0-9]+)*$",
-            value,
-        ) is None:
+        if (
+            re.fullmatch(
+                r"^[가-힣a-zA-Z0-9]+([-_][가-힣a-zA-Z0-9]+)*$",
+                value,
+            )
+            is None
+        ):
             raise ValueError(
                 "닉네임은 2~10자의 한글, 영문, 숫자와 하이픈(-), 및줄(_)만 사용할 수 있으며, "
                 "하이픈과 밑줄은 처음, 끝 또는 연속해서 사용할 수 없습니다."
