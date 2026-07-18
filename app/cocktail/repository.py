@@ -7,7 +7,6 @@
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
-from app.cocktail.mock import MOCK_COCKTAILS
 from cocktail_mate_db.models import Cocktail, CocktailIngredient, Ingredient
 
 
@@ -86,16 +85,6 @@ class CocktailRepository:
         )
 
         return {"items": [row[0] for row in rows]}
-
-    def search(self, keyword: str) -> list[dict]:
-        kw = keyword.lower()
-        return [
-            c
-            for c in MOCK_COCKTAILS
-            if kw in c["name"].lower()
-            or kw in c["baseTag"].lower()
-            or kw in c["description"].lower()
-        ]
 
     def find_detail_by_id(self, db: Session, cocktail_id: int) -> dict | None:
         cocktail = db.query(Cocktail).filter(Cocktail.id == cocktail_id).first()

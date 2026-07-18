@@ -22,9 +22,9 @@ from app.auth.cookies import (
 from app.auth.dependencies import CurrentUser
 from app.auth.providers import SocialAuthError, get_provider
 from app.auth.schemas import (
-  MessageResponse, 
-  NicknameChangeRequest,
-  UserResponse,
+    MessageResponse,
+    NicknameChangeRequest,
+    UserResponse,
 )
 from app.auth.service import AuthService
 from app.core.config import get_settings

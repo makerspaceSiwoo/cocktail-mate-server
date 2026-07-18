@@ -1,0 +1,24 @@
+# 포맷 검사 상시 강제 — push/PR마다 `ruff format --check`.
+# 로컬 훅(pre-push) 설정 여부와 무관하게, 미포맷 코드가 저장소에 들어오는 것을
+# 서버사이드(CI)에서 막는다. 실패하면 PR 상태 체크가 빨간불이 되어 머지를 차단한다.
+name: format-check
+
+on:
+  push:
+    branches: [main, develop]   # main/develop 직접 push·PR 머지 후 안전망
+  pull_request:                 # 피처 브랜치·fork PR 은 여기서 검사(중복 방지)
+
+jobs:
+  ruff-format:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      # 로컬(.venv)과 동일 버전 고정 → 포맷 결과가 CI와 어긋나지 않는다.
+      # ruff 를 올릴 땐 이 버전과 requirements-dev 를 함께 갱신하고 `make format` 재실행.
+      - name: Install ruff
+        run: pip install ruff==0.15.12
+      - name: ruff format --check
+        run: ruff format --check .
