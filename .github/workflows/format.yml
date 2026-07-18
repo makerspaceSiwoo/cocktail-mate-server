@@ -5,7 +5,8 @@ name: format-check
 
 on:
   push:
-  pull_request:
+    branches: [main, develop]   # main/develop 직접 push·PR 머지 후 안전망
+  pull_request:                 # 피처 브랜치·fork PR 은 여기서 검사(중복 방지)
 
 jobs:
   ruff-format:
