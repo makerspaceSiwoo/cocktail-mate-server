@@ -12,7 +12,13 @@ class ExploreRepository:
     def list_with_embedding_3d(self, db: Session) -> list[dict]:
         # 3D 벡터 맵은 전체 좌표를 한 번에 렌더링하므로 페이지네이션 없이 전량 반환한다(의도적).
         rows = db.execute(
-            select(Cocktail.id, Cocktail.name, Cocktail.abv, Cocktail.embedding_3d)
+            select(
+                Cocktail.id,
+                Cocktail.name,
+                Cocktail.abv,
+                Cocktail.base_tag,
+                Cocktail.embedding_3d,
+            )
             .where(Cocktail.embedding_3d.isnot(None))
             .order_by(Cocktail.id)
         ).all()
@@ -21,7 +27,25 @@ class ExploreRepository:
                 "id": row.id,
                 "name": row.name,
                 "abv": row.abv,
+                "baseTag": row.base_tag,
                 "embedding3d": [float(x) for x in row.embedding_3d],
             }
             for row in rows
         ]
+
+    def get_by_id(self, db: Session, cocktail_id: int) -> dict | None:
+        cocktail = db.get(Cocktail, cocktail_id)
+        if cocktail is None:
+            return None
+        return {
+            "name": cocktail.name,
+            "nameEn": cocktail.name_en,
+            "abv": cocktail.abv,
+            "description": cocktail.description,
+            "baseTag": cocktail.base_tag,
+            "embedding3d": (
+                [float(x) for x in cocktail.embedding_3d]
+                if cocktail.embedding_3d is not None
+                else None
+            ),
+        }

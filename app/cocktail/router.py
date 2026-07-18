@@ -8,10 +8,7 @@ from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 
 from app.cocktail.schemas import (
-    CocktailExplore,
-    DrinkOfTheDay,
     DailyRecommendResponse,
-    SearchResult,
     CocktailListResponse,
     BaseTagListResponse,
 )
@@ -29,11 +26,6 @@ def root():
     return {"message": "Hello World"}
 
 
-@router.get("/search", response_model=SearchResult)
-def search_cocktails(keyword: str = "", page: int = 1, rpp: int = 10):
-    return service.search(keyword, page, rpp)
-
-
 @router.get("/cocktail/base-tags", response_model=BaseTagListResponse)
 def get_base_tags(db: Session = Depends(get_db)):
     return service.get_base_tags(db)
@@ -49,16 +41,6 @@ def cocktail_list(
 ):
     user_id = current_user.id if current_user is not None else None
     return service.list_cocktails(db, page, rpp, base, user_id)
-
-
-@router.get("/explore/{id}", response_model=CocktailExplore)
-def explore_cocktail(id: int):
-    return service.explore(id)
-
-
-@router.get("/drink-of-the-day", response_model=DrinkOfTheDay)
-def drink_of_the_day():
-    return service.drink_of_the_day()
 
 
 @router.get("/daily-recommend", response_model=DailyRecommendResponse)

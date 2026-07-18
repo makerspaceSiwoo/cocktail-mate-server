@@ -7,4 +7,14 @@ class ExploreItem(BaseModel):
     id: int
     name: str
     abv: float | None = None
+    baseTag: str | None = None
     embedding3d: list[float]
+
+
+class ExploreDetail(BaseModel):
+    name: str
+    nameEn: str | None = None
+    abv: float | None = None
+    description: str | None = None
+    baseTag: str | None = None
+    embedding3d: list[float] | None = None
