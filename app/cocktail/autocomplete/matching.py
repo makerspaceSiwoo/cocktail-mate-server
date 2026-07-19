@@ -2,7 +2,7 @@
 
 Uses rapidfuzz.fuzz.partial_ratio (0–100 scale) instead of hand-rolled
 trigram Dice. Asymmetric window eliminates the length penalty that caused
-短 queries to miss longer names (e.g. '깔루아' missing '칼루아 밀크').
+short queries to miss longer names (e.g. '깔루아' missing '칼루아 밀크').
 
 Pure module — no FastAPI/DB imports.
 """

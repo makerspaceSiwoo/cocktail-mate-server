@@ -33,7 +33,7 @@ MAX_LEN = 100
 # Control characters U+0000-U+001F (C0 controls) and U+007F (DEL)
 _CTRL_RE = re.compile(r"[\x00-\x1f\x7f]")
 # Zero-width chars: ZWSP U+200B, ZWJ U+200D, ZWNJ U+200C, BOM U+FEFF
-_ZWSP_RE = re.compile("[​-‍﻿]")
+_ZWSP_RE = re.compile("[\u200b-\u200d\ufeff]")
 _WS_RE = re.compile(r"\s+")
 
 
