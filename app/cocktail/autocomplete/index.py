@@ -41,9 +41,14 @@ _CHOSEONG_SET: set[str] = set(CHOSEONG)
 
 @dataclass(frozen=True)
 class IndexItem:
+    # Display fields (static catalog data, surfaced in results).
     id: int
     name: str
     name_en: str | None
+    image_url: str | None
+    base_tag: str | None
+    description: str | None
+    # Matching fields (used only for scoring, never returned).
     ko_norm: str
     en_norm: str | None
     cho: str
@@ -123,12 +128,14 @@ class CocktailSearchIndex:
 
     @classmethod
     def build(cls, rows) -> "CocktailSearchIndex":
-        """Build an index from an iterable of (id, name, name_en) tuples.
+        """Build an index from an iterable of
+        (id, name, name_en, image_url, base_tag, description) tuples.
 
-        DB-free: tests can call this with plain fixtures.
+        DB-free: callers can pass plain fixtures.
         """
         items: list[IndexItem] = []
-        for row_id, row_name, row_name_en in rows:
+        for row in rows:
+            row_id, row_name, row_name_en, row_image, row_base, row_desc = row
             ko_norm = norm(row_name)
             en_norm = norm(row_name_en) if row_name_en else None
             cho = extract_choseong(row_name)
@@ -137,6 +144,9 @@ class CocktailSearchIndex:
                     id=row_id,
                     name=row_name,
                     name_en=row_name_en,
+                    image_url=row_image,
+                    base_tag=row_base,
+                    description=row_desc,
                     ko_norm=ko_norm,
                     en_norm=en_norm,
                     cho=cho,
@@ -149,7 +159,14 @@ class CocktailSearchIndex:
         """Query the DB and build the index. Cocktail import is deferred here."""
         from cocktail_mate_db.models import Cocktail  # noqa: PLC0415
 
-        rows = db.query(Cocktail.id, Cocktail.name, Cocktail.name_en).all()
+        rows = db.query(
+            Cocktail.id,
+            Cocktail.name,
+            Cocktail.name_en,
+            Cocktail.image_url,
+            Cocktail.base_tag,
+            Cocktail.description,
+        ).all()
         return cls.build(rows)
 
     def search(self, keyword: str, limit: int) -> list[dict]:
@@ -176,6 +193,9 @@ class CocktailSearchIndex:
                         "id": item.id,
                         "name": item.name,
                         "name_en": item.name_en,
+                        "image_url": item.image_url,
+                        "base_tag": item.base_tag,
+                        "description": item.description,
                         "tier": tier,
                         "score": score,
                         "matched_field": matched_field,
