@@ -9,6 +9,10 @@ from app.like.repository import LikeRepository
 
 from fastapi import HTTPException
 
+from app.cocktail.autocomplete.index import ensure_index
+from app.cocktail.autocomplete.normalize import sanitize_keyword
+from app.cocktail.schemas import AutocompleteItem, AutocompleteResponse
+
 # MVP 기준 한국 시간(UTC+9)의 날짜를 오늘의 추천 시드로 사용한다.
 KST = timezone(timedelta(hours=9))
 
@@ -82,3 +86,36 @@ class CocktailService:
         )
 
         return cocktail
+
+
+def autocomplete(
+    db: Session,
+    keyword: str,
+    limit: int,
+    debug: bool,
+) -> AutocompleteResponse | dict:
+    idx = ensure_index(db)
+    kw = sanitize_keyword(keyword)
+    rows = idx.search(keyword, limit)
+    if debug:
+        items = [
+            {
+                "id": row["id"],
+                "name": row["name"],
+                "nameEn": row["name_en"],
+                "score": row["score"],
+                "tier": row["tier"],
+                "matchedField": row["matched_field"],
+            }
+            for row in rows
+        ]
+        return {"keyword": kw, "items": items}
+    items_pydantic: list[AutocompleteItem] = [
+        AutocompleteItem(
+            id=row["id"],
+            name=row["name"],
+            nameEn=row["name_en"],
+        )
+        for row in rows
+    ]
+    return AutocompleteResponse(keyword=kw, items=items_pydantic)

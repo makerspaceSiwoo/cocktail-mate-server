@@ -4,14 +4,18 @@
 """
 
 from fastapi import APIRouter, Depends, Query
+from fastapi.encoders import jsonable_encoder
+from fastapi.responses import JSONResponse
 
 from sqlalchemy.orm import Session
 
 from app.cocktail.schemas import (
+    AutocompleteResponse,
     DailyRecommendResponse,
     CocktailListResponse,
     BaseTagListResponse,
 )
+from app.cocktail import service as cocktail_service
 from app.cocktail.service import CocktailService
 from app.auth.dependencies import OptionalUser
 from app.core.database import get_db
@@ -56,3 +60,16 @@ def get_cocktail_detail(
 ):
     user_id = current_user.id if current_user is not None else None
     return service.get_detail(db, id, user_id)
+
+
+@router.get("/search/autocomplete", response_model=AutocompleteResponse)
+def search_autocomplete(
+    keyword: str = Query(""),
+    limit: int = Query(10, ge=1, le=50),
+    debug: bool = Query(False),
+    db: Session = Depends(get_db),
+):
+    result = cocktail_service.autocomplete(db, keyword, limit, debug)
+    if debug:
+        return JSONResponse(content=jsonable_encoder(result))
+    return result
