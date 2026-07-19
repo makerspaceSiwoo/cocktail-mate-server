@@ -208,4 +208,5 @@ def ensure_index(db) -> CocktailSearchIndex:
         with _lock:
             if _index is None:
                 set_index(CocktailSearchIndex.load_from_db(db))
+    assert _index is not None
     return _index

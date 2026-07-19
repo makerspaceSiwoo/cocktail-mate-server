@@ -96,7 +96,7 @@ def autocomplete(
 ) -> AutocompleteResponse | dict:
     idx = ensure_index(db)
     kw = sanitize_keyword(keyword)
-    rows = idx.search(keyword, limit)
+    rows = idx.search(kw, limit)
     if debug:
         items = [
             {

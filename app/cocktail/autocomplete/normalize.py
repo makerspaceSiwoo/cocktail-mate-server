@@ -36,8 +36,8 @@ SEPARATORS = set(" ·・-_/()[]")
 MAX_LEN = 100
 
 # Regex patterns for sanitize_keyword
-# Control characters U+0001-U+001F and U+007F (avoid literal null in source)
-_CTRL_RE = re.compile("[-]")
+# Control characters U+0000-U+001F (C0 controls) and U+007F (DEL)
+_CTRL_RE = re.compile(r"[\x00-\x1f\x7f]")
 # Zero-width chars: ZWSP U+200B, ZWJ U+200D, ZWNJ U+200C, BOM U+FEFF
 _ZWSP_RE = re.compile("[​-‍﻿]")
 _WS_RE = re.compile(r"\s+")

@@ -71,5 +71,7 @@ def search_autocomplete(
 ):
     result = cocktail_service.autocomplete(db, keyword, limit, debug)
     if debug:
+        # Intentional: JSONResponse bypasses response_model so debug-only fields
+        # (score, tier, matchedField) are preserved; response_model would strip them.
         return JSONResponse(content=jsonable_encoder(result))
     return result
