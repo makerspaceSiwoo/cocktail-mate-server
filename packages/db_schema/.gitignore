@@ -1,0 +1,18 @@
+# 시크릿 — 절대 커밋 금지
+.env
+
+# Terraform 로컬 상태/변수 (OCID·키 포함)
+*.tfvars
+!*.tfvars.example
+*.tfstate
+*.tfstate.*
+.terraform/
+.terraform.lock.hcl
+*.pem
+
+# Python
+__pycache__/
+*.egg-info/
+dist/
+build/
+.venv/

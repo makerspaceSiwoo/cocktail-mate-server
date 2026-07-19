@@ -1,0 +1,30 @@
+# 로컬 개발/검증용 PostgreSQL (pgvector + citext 포함).
+#
+# - OCI용 docker-compose.db.yml과 달리 로컬 named 볼륨을 쓴다(external 아님).
+# - 포트 5432를 로컬에만 노출 → .env의 DATABASE_URL(localhost:5432)과 DBeaver가 그대로 접속.
+# - 스키마는 Alembic 책임(여기선 init SQL 마운트 없음).
+#
+# 실행:
+#   set -a && . ./.env && set +a
+#   docker compose -f docker/docker-compose.local.yml up -d
+services:
+  db:
+    image: pgvector/pgvector:pg16   # postgres16 + pgvector. citext는 표준 contrib로 포함.
+    container_name: cocktail-mate-db-local
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-cocktail_mate}
+      POSTGRES_USER: ${POSTGRES_USER:-cm_admin}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?.env에 POSTGRES_PASSWORD 설정 필요}
+    ports:
+      - "127.0.0.1:5432:5432"
+    volumes:
+      - cocktail_mate_db_local:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-cm_admin} -d ${POSTGRES_DB:-cocktail_mate}"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+volumes:
+  cocktail_mate_db_local:

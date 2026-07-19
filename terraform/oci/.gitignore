@@ -1,0 +1,20 @@
+# Terraform 로컬 상태/비밀값 — 커밋 금지
+.terraform/
+.terraform.lock.hcl
+*.tfstate
+*.tfstate.*
+crash.log
+crash.*.log
+
+# 변수 파일에는 비밀값 포함 (example만 커밋)
+*.tfvars
+*.tfvars.json
+!*.tfvars.example
+
+# 렌더된 backend 설정(실제 S3 키 포함) — 커밋 금지 (example만 커밋)
+backend.hcl
+
+# API private key / 인증서 / 키 파일 (절대 커밋 금지)
+*.pem
+*.key
+oci_api_key*

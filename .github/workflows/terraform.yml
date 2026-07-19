@@ -1,0 +1,82 @@
+name: Terraform
+
+on:
+  pull_request:
+    paths:
+      - 'terraform/oci/**'
+      - '.github/workflows/terraform.yml'
+  workflow_dispatch:
+    inputs:
+      action:
+        description: plan or apply
+        type: choice
+        options:
+          - plan
+          - apply
+        default: plan
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    working-directory: terraform/oci
+
+jobs:
+  plan:
+    name: Terraform Plan
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request' || (github.event_name == 'workflow_dispatch' && github.event.inputs.action == 'plan')
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.15.5
+
+      - name: Render secrets to runner temp
+        env:
+          TFVARS_JSON: ${{ secrets.TERRAFORM_TFVARS_JSON }}
+          BACKEND_CONFIG: ${{ secrets.TERRAFORM_BACKEND_CONFIG }}
+        run: |
+          printf '%s' "$TFVARS_JSON" > "$RUNNER_TEMP/terraform.tfvars.json"
+          printf '%s' "$BACKEND_CONFIG" > "$RUNNER_TEMP/backend.hcl"
+
+      - name: Terraform Init
+        run: terraform init -backend-config="$RUNNER_TEMP/backend.hcl"
+
+      - name: Terraform Plan
+        run: terraform plan -var-file="$RUNNER_TEMP/terraform.tfvars.json" -no-color
+
+  apply:
+    name: Terraform Apply
+    runs-on: ubuntu-latest
+    environment: production
+    if: github.event_name == 'workflow_dispatch' && github.event.inputs.action == 'apply'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.15.5
+
+      - name: Render secrets to runner temp
+        env:
+          TFVARS_JSON: ${{ secrets.TERRAFORM_TFVARS_JSON }}
+          BACKEND_CONFIG: ${{ secrets.TERRAFORM_BACKEND_CONFIG }}
+        run: |
+          printf '%s' "$TFVARS_JSON" > "$RUNNER_TEMP/terraform.tfvars.json"
+          printf '%s' "$BACKEND_CONFIG" > "$RUNNER_TEMP/backend.hcl"
+
+      - name: Terraform Init
+        run: terraform init -backend-config="$RUNNER_TEMP/backend.hcl"
+
+      - name: Terraform Plan
+        run: terraform plan -var-file="$RUNNER_TEMP/terraform.tfvars.json" -no-color -out=tfplan
+
+      - name: Terraform Apply
+        run: terraform apply -auto-approve -no-color tfplan

@@ -1,0 +1,26 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "cocktail-mate-db"
+version = "0.4.0"
+description = "cocktail-mate canonical SQLAlchemy models + Alembic migrations"
+requires-python = ">=3.12"
+# 런타임(api-server가 import할 때) 의존성은 이 둘뿐.
+# alembic/psycopg2는 마이그레이션 실행자만 필요 → [migrations] extra.
+dependencies = [
+    "sqlalchemy>=2.0",
+    "pgvector>=0.2.5",
+]
+
+[project.optional-dependencies]
+migrations = [
+    "alembic>=1.13",
+    "psycopg2-binary",
+    "pydantic-settings>=2.0",
+    "python-dotenv",                # pydantic-settings의 .env 파싱에 필요
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
