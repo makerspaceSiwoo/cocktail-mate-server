@@ -1,48 +1,38 @@
-"""Trigram similarity primitives for cocktail search autocomplete.
+"""Fuzzy similarity primitives for cocktail search autocomplete.
+
+Uses rapidfuzz.fuzz.partial_ratio (0–100 scale) instead of hand-rolled
+trigram Dice. Asymmetric window eliminates the length penalty that caused
+短 queries to miss longer names (e.g. '깔루아' missing '칼루아 밀크').
 
 Pure module — no FastAPI/DB imports.
 """
 
-import math
+from rapidfuzz import fuzz
 
-THRESHOLDS = {"ko": 0.45, "en": 0.35}
+# Thresholds on the 0–100 scale (tuned against §10-2 spec cases).
+# ko: Korean jamo-normalized similarity; en: English similarity.
+THRESHOLDS = {"ko": 70, "en": 78}
+
+# Minimum length of the normalized query to run fuzzy matching.
+# Short queries (< 3 jamo/chars) over-match at partial_ratio=100 against
+# any name that contains them (spec §9/§6-6).
+MIN_FUZZY_LEN = 3
 
 
-def trigrams(s: str) -> set:
-    """Compute the set of trigrams for a string (spec §6-6).
+def similarity(a: str, b: str) -> float:
+    """Return partial_ratio similarity between two strings (0–100).
 
-    Uses padding "  " + s + " " so any non-empty string yields ≥1 trigram.
-    Returns empty set for falsy input.
+    rapidfuzz.fuzz.partial_ratio slides the shorter string across the longer
+    one and returns the best window score — eliminates length penalty.
+    Never returns NaN; always finite.
     """
-    if not s:
-        return set()
-    padded = "  " + s + " "
-    return {padded[i : i + 3] for i in range(len(padded) - 2)}
-
-
-def dice(a: str, b: str) -> float:
-    """Sørensen–Dice coefficient over trigram sets (spec §6-6).
-
-    Guards against denom == 0 → returns 0.0 (prevents NaN).
-    """
-    A = trigrams(a)
-    B = trigrams(b)
-    denom = len(A) + len(B)
-    if denom == 0:
-        return 0.0
-    inter = len(A & B)
-    return 2 * inter / denom
-
-
-def safe(n: float) -> float:
-    """Return n if finite, else 0.0 (defense-in-depth for sort comparators)."""
-    return n if math.isfinite(n) else 0.0
+    return fuzz.partial_ratio(a, b)
 
 
 def rank_score(sim: float, field: str) -> float:
     """Normalize similarity to [0, 1] relative to the field threshold (spec §5-4).
 
-    Maps sim == threshold → 0.0 and sim == 1.0 → 1.0.
+    Maps sim == threshold → 0.0 and sim == 100 → 1.0.
     """
     t = THRESHOLDS[field]
-    return (sim - t) / (1 - t)
+    return (sim - t) / (100 - t)

@@ -3,7 +3,7 @@
 Scoring tiers (spec §6-3/§6-4/§6-6 대응3):
   3 = exact match (normalized)  → score 1.0
   2 = prefix match              → score len(q) / len(target)
-  1 = fuzzy (dice ≥ threshold)  → score rank_score(sim, field)
+  1 = fuzzy (partial_ratio ≥ threshold)  → score rank_score(sim, field)
   1 = choseong-prefix           → score len(q) / len(cho)
   0 = no match (excluded)
 """
@@ -13,7 +13,12 @@ from __future__ import annotations
 import threading
 from dataclasses import dataclass
 
-from app.cocktail.autocomplete.matching import THRESHOLDS, dice, rank_score, safe
+from app.cocktail.autocomplete.matching import (
+    MIN_FUZZY_LEN,
+    THRESHOLDS,
+    rank_score,
+    similarity,
+)
 from app.cocktail.autocomplete.normalize import (
     CHOSEONG,
     extract_choseong,
@@ -61,9 +66,10 @@ def _score_field(
         return (3, 1.0, field)
     if target_norm.startswith(q_norm):
         return (2, len(q_norm) / len(target_norm), field)
-    sim = dice(q_norm, target_norm)
-    if sim >= THRESHOLDS[field]:
-        return (1, rank_score(sim, field), field)
+    if len(q_norm) >= MIN_FUZZY_LEN:
+        sim = similarity(q_norm, target_norm)
+        if sim >= THRESHOLDS[field]:
+            return (1, rank_score(sim, field), field)
     return EMPTY
 
 
@@ -86,8 +92,8 @@ def _best(
     a: tuple[int, float, str | None],
     b: tuple[int, float, str | None],
 ) -> tuple[int, float, str | None]:
-    """Return the better candidate (higher tier, then higher safe-score)."""
-    if (b[0], safe(b[1])) > (a[0], safe(a[1])):
+    """Return the better candidate (higher tier, then higher score)."""
+    if (b[0], b[1]) > (a[0], a[1]):
         return b
     return a
 
@@ -177,7 +183,7 @@ class CocktailSearchIndex:
                 )
 
         candidates.sort(
-            key=lambda c: (-c["tier"], -safe(c["score"]), len(c["name"]), c["id"])
+            key=lambda c: (-c["tier"], -c["score"], len(c["name"]), c["id"])
         )
         return candidates[:limit]
 

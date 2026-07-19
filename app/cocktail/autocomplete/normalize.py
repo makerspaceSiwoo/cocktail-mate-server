@@ -2,29 +2,23 @@
 
 Compatibility-jamo decomposition (U+3130~), NOT NFD/conjoining (U+1100~).
 This is the crux that makes IME mid-composition input and choseong search work.
+
+Uses the `jamo` library (j2hcj(h2j(...))) for syllable decomposition. Since
+sanitize_keyword applies NFC first, inputs reaching norm() are precomposed, so
+this is functionally equivalent to the previous hand-rolled decomposition for all
+practical inputs (precomposed syllables, standalone compat jamo, ASCII).
 """
 
 import re
 import unicodedata
+
+from jamo import h2j, j2hcj
 
 # fmt: off
 # 19 leading consonants (choseong), compatibility jamo forms
 CHOSEONG = [
     "ㄱ", "ㄲ", "ㄴ", "ㄷ", "ㄸ", "ㄹ", "ㅁ", "ㅂ", "ㅃ",
     "ㅅ", "ㅆ", "ㅇ", "ㅈ", "ㅉ", "ㅊ", "ㅋ", "ㅌ", "ㅍ", "ㅎ",
-]
-
-# 21 vowels (jungseong), compatibility jamo forms
-JUNGSEONG = [
-    "ㅏ", "ㅐ", "ㅑ", "ㅒ", "ㅓ", "ㅔ", "ㅕ", "ㅖ", "ㅗ", "ㅘ", "ㅙ",
-    "ㅚ", "ㅛ", "ㅜ", "ㅝ", "ㅞ", "ㅟ", "ㅠ", "ㅡ", "ㅢ", "ㅣ",
-]
-
-# 28 trailing consonants (jongseong), index 0 = "" (no final consonant)
-JONGSEONG = [
-    "",       "ㄱ", "ㄲ", "ㄳ", "ㄴ", "ㄵ", "ㄶ", "ㄷ", "ㄹ",
-    "ㄺ", "ㄻ", "ㄼ", "ㄽ", "ㄾ", "ㄿ", "ㅀ", "ㅁ", "ㅂ",
-    "ㅄ", "ㅅ", "ㅆ", "ㅇ", "ㅈ", "ㅊ", "ㅋ", "ㅌ", "ㅍ", "ㅎ",
 ]
 # fmt: on
 
@@ -60,26 +54,11 @@ def sanitize_keyword(raw) -> str:
     return s
 
 
-def _decompose_syllable(ch: str) -> str:
-    """Decompose a precomposed Hangul syllable into compatibility jamo.
-
-    For any other character (ASCII, already-compatibility jamo U+3130~,
-    digits, symbols), return the character unchanged (spec §5-1).
-    """
-    code = ord(ch)
-    if 0xAC00 <= code <= 0xD7A3:
-        s = code - 0xAC00
-        cho = s // 588
-        jung = (s % 588) // 28
-        jong = s % 28
-        return CHOSEONG[cho] + JUNGSEONG[jung] + JONGSEONG[jong]
-    return ch
-
-
 def norm(s) -> str:
     """Normalize a string for matching (spec §5-1).
 
-    Steps: NFC -> lower -> strip separators -> decompose Hangul syllables.
+    Steps: NFC -> lower -> strip separators -> decompose Hangul syllables to
+    compatibility jamo (U+3130~) via the jamo library.
     Pure function; no FastAPI/DB imports.
     """
     if not s:
@@ -87,7 +66,7 @@ def norm(s) -> str:
     s = unicodedata.normalize("NFC", s)
     s = s.lower()
     s = "".join(ch for ch in s if ch not in SEPARATORS)
-    s = "".join(_decompose_syllable(ch) for ch in s)
+    s = j2hcj(h2j(s))
     return s
 
 
