@@ -1,8 +1,8 @@
 """좋아요 라우터.
 
-- POST   /cocktails/{id}/like   : 좋아요 등록 (로그인 필수)
-- DELETE /cocktails/{id}/like   : 좋아요 해제 (로그인 필수)
-- GET    /like/list             : 내 좋아요 목록 (로그인 필수, 경로 유지)
+- POST   /like       : 좋아요 등록 (로그인 필수)
+- DELETE /unlike     : 좋아요 해제 (로그인 필수)
+- GET    /like/list  : 내 좋아요 목록 (로그인 필수)
 """
 
 from fastapi import APIRouter, Depends
