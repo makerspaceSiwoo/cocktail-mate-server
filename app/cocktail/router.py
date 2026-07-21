@@ -49,5 +49,10 @@ def daily_recommend(db: Session = Depends(get_db)):
 
 
 @router.get("/cocktail/{id}", response_model=CocktailDetailResponse)
-def get_cocktail_detail(id: int, db: Session = Depends(get_db)):
-    return service.get_detail(db, id)
+def get_cocktail_detail(
+    id: int,
+    current_user: OptionalUser,
+    db: Session = Depends(get_db),
+):
+    user_id = current_user.id if current_user is not None else None
+    return service.get_detail(db, id, user_id)
