@@ -36,7 +36,16 @@ class CocktailService:
             if user_id is not None
             else None
         )
-        return self.repository.list_all(db, page, rpp, base, liked_ids)
+        result = self.repository.list_all(db, page, rpp, base, liked_ids)
+
+        # 현재 페이지 칵테일들의 좋아요 수를 한 번에 조회해 likeCount 를 채운다.
+        like_counts = self.like_repository.like_counts_for(
+            db, [item["id"] for item in result["items"]]
+        )
+        for item in result["items"]:
+            item["likeCount"] = like_counts.get(item["id"], 0)
+
+        return result
 
     def get_base_tags(self, db: Session) -> dict:
         return self.repository.get_base_tags(db)
