@@ -30,13 +30,27 @@ class CocktailService:
         base: str | None,
         user_id: int | None = None,
     ) -> dict:
-        # 로그인 유저면 좋아요 집합을 조회해 각 항목의 is_liked 를 채운다.
         liked_ids = (
             self.like_repository.liked_cocktail_ids(db, user_id)
             if user_id is not None
             else None
         )
-        return self.repository.list_all(db, page, rpp, base, liked_ids)
+
+        response = self.repository.list_all(
+            db,
+            page,
+            rpp,
+            base,
+            liked_ids,
+        )
+
+        cocktail_ids = [item["id"] for item in response["items"]]
+        like_counts = self.like_repository.like_counts_for(db, cocktail_ids)
+
+        for item in response["items"]:
+            item["likeCount"] = like_counts.get(item["id"], 0)
+
+        return response
 
     def get_base_tags(self, db: Session) -> dict:
         return self.repository.get_base_tags(db)
