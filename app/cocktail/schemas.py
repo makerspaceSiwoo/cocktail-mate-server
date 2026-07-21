@@ -29,6 +29,8 @@ class CocktailDetailResponse(BaseModel):
     recipe: list[str] | None = None
     description: str | None = None
     baseTag: str | None = None
+    isLiked: bool = False
+    likeCount: int = 0
     ingredients: list[CocktailIngredientDetail]
 
 
@@ -41,8 +43,8 @@ class CocktailListItem(BaseModel):
     description: str | None = None
     abv: float | None = None
     glass: str | None = None
-    # 로그인 시 해당 유저의 좋아요 여부. 비로그인은 항상 False.
     isLiked: bool = False
+    likeCount: int = 0
 
 
 class CocktailListMeta(BaseModel):
