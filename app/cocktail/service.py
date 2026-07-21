@@ -60,10 +60,31 @@ class CocktailService:
         seed = datetime.now(KST).strftime("%Y-%m-%d")
         return {"items": self.repository.daily_cocktails(db, seed, count)}
 
-    def get_detail(self, db: Session, cocktail_id: int) -> dict:
+    def get_detail(
+        self,
+        db: Session,
+        cocktail_id: int,
+        user_id: int | None = None,
+    ) -> dict:
         cocktail = self.repository.find_detail_by_id(db, cocktail_id)
 
         if cocktail is None:
             raise HTTPException(status_code=404, detail="Cocktail not found")
+
+        cocktail["likeCount"] = self.like_repository.count_likes(
+            db,
+            cocktail_id,
+        )
+
+        cocktail["isLiked"] = (
+            self.like_repository.get_like(
+                db,
+                user_id,
+                cocktail_id,
+            )
+            is not None
+            if user_id is not None
+            else False
+        )
 
         return cocktail
