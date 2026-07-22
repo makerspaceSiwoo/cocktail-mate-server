@@ -53,19 +53,37 @@ class LikeService:
             "message": "좋아요 취소 성공",
         }
 
-    def like_list(self, db: Session, user_id: int) -> dict:
-        cocktails = self.repository.list_liked_cocktails(db, user_id)
-        counts = self.repository.like_counts_for(db, [c.id for c in cocktails])
+    def like_list(
+        self,
+        db: Session,
+        user_id: int,
+        page: int,
+        rpp: int,
+    ) -> dict:
+        result = self.repository.list_liked_cocktails(
+            db,
+            user_id,
+            page,
+            rpp,
+        )
+        cocktails = result["cocktails"]
+
+        counts = self.repository.like_counts_for(
+            db,
+            [cocktail.id for cocktail in cocktails],
+        )
+
         return {
             "cocktails": [
                 {
-                    "cocktailId": c.id,
-                    "cocktailName": c.name,
-                    "imageUrl": c.image_url or "",
-                    "baseTag": c.base_tag or "",
-                    "likeCount": counts.get(c.id, 0),
+                    "cocktailId": cocktail.id,
+                    "cocktailName": cocktail.name,
+                    "imageUrl": cocktail.image_url or "",
+                    "baseTag": cocktail.base_tag or "",
+                    "likeCount": counts.get(cocktail.id, 0),
                     "isLiked": True,
                 }
-                for c in cocktails
-            ]
+                for cocktail in cocktails
+            ],
+            "meta": result["meta"],
         }
