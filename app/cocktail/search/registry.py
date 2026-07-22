@@ -27,13 +27,15 @@ def get_index() -> CocktailNameSearchIndex | None:
 def set_index(idx: CocktailNameSearchIndex) -> None:
     """Set the global index (used by lifespan warm-up and verification)."""
     global _index
-    _index = idx
+    with _lock:
+        _index = idx
 
 
 def clear_index() -> None:
     """Reset the global index to None (used by verification)."""
     global _index
-    _index = None
+    with _lock:
+        _index = None
 
 
 def ensure_index(db) -> CocktailNameSearchIndex:
@@ -47,11 +49,21 @@ def ensure_index(db) -> CocktailNameSearchIndex:
     a single statement -- if `load_documents`/`CocktailNameSearchIndex`
     construction raises, the registry is left unchanged (still empty rather
     than half-built).
+
+    The global is read exactly once per code path into a local (`idx`),
+    which is what's returned -- never re-reading `_index` after the lock is
+    released. This closes a TOCTOU window where a concurrent `clear_index()`
+    could otherwise be observed mid-function (e.g. between a not-None check
+    and the return), which previously risked an `AssertionError` or a stray
+    `None` return.
     """
     global _index
-    if _index is None:
-        with _lock:
-            if _index is None:
-                set_index(CocktailNameSearchIndex(load_documents(db)))
-    assert _index is not None
-    return _index
+    idx = _index
+    if idx is not None:
+        return idx
+    with _lock:
+        idx = _index
+        if idx is None:
+            idx = CocktailNameSearchIndex(load_documents(db))
+            _index = idx
+        return idx
