@@ -53,11 +53,11 @@ def _configure_logging(level_name: str) -> None:
 async def _lifespan(app: FastAPI):
     """Warm up the autocomplete index at startup (best-effort)."""
     try:
-        from app.cocktail.autocomplete.index import ensure_index  # noqa: PLC0415
+        from app.cocktail.search import registry  # noqa: PLC0415
 
         db = SessionLocal()
         try:
-            ensure_index(db)
+            registry.ensure_index(db)
             logger.info("Autocomplete index warmed up at startup.")
         finally:
             db.close()
