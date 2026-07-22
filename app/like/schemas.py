@@ -16,8 +16,15 @@ class LikedCocktail(BaseModel):
     isLiked: bool
 
 
+class LikeListMeta(BaseModel):
+    page: int
+    rpp: int
+    hasNextPage: bool
+
+
 class LikeListResponse(BaseModel):
     cocktails: list[LikedCocktail]
+    meta: LikeListMeta
 
 
 class LikeActionResponse(BaseModel):
