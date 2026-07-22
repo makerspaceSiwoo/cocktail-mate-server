@@ -29,6 +29,8 @@ class CocktailDetailResponse(BaseModel):
     recipe: list[str] | None = None
     description: str | None = None
     baseTag: str | None = None
+    isLiked: bool = False
+    likeCount: int = 0
     ingredients: list[CocktailIngredientDetail]
 
 
