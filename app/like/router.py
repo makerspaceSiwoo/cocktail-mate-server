@@ -5,7 +5,7 @@
 - GET    /like/list  : 내 좋아요 목록 (로그인 필수)
 """
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 from cocktail_mate_db.models import User
 
@@ -42,9 +42,9 @@ def unlike_cocktail(
 
 @router.get("/like/list", response_model=LikeListResponse)
 def get_like_list(
-    current_user: User = Depends(get_current_user),
     page: int = Query(1, ge=1),
     rpp: int = Query(10, ge=1, le=50),
+    current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
     return service.like_list(db, current_user.id, page, rpp)

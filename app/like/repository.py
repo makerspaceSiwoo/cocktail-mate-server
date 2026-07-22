@@ -40,16 +40,38 @@ class LikeRepository:
             is not None
         )
 
-    def list_liked_cocktails(self, db: Session, user_id: int) -> list[Cocktail]:
-        """유저가 좋아요한 칵테일 목록 (최근 좋아요 순)."""
-        return list(
+    def list_liked_cocktails(
+        self,
+        db: Session,
+        user_id: int,
+        page: int,
+        rpp: int,
+    ) -> dict:
+        """유저가 좋아요한 칵테일 목록을 최근 좋아요 순으로 조회한다."""
+        cocktails = list(
             db.execute(
                 select(Cocktail)
                 .join(Like, Like.cocktail_id == Cocktail.id)
                 .where(Like.user_id == user_id)
-                .order_by(Like.created_at.desc())
+                .order_by(
+                    Like.created_at.desc(),
+                )
+                .offset((page - 1) * rpp)
+                .limit(rpp + 1)
             ).scalars()
         )
+
+        has_next_page = len(cocktails) > rpp
+        cocktails = cocktails[:rpp]
+
+        return {
+            "cocktails": cocktails,
+            "meta": {
+                "page": page,
+                "rpp": rpp,
+                "hasNextPage": has_next_page,
+            },
+        }
 
     def liked_cocktail_ids(self, db: Session, user_id: int) -> set[int]:
         """유저가 좋아요한 cocktail_id 집합 (is_liked 매핑용)."""
