@@ -94,6 +94,20 @@ def autocomplete(
     limit: int,
     debug: bool,
 ) -> AutocompleteResponse | dict:
+    """Run the cocktail name search core and shape the API response.
+
+    Response contract (binding -- do not fold into a shared item builder
+    without preserving this split):
+    - `debug=False` (normal): returns an `AutocompleteResponse` whose items
+      carry ONLY `id`, `name`, `nameEn`. `nameEn` is always present (may be
+      `None`).
+    - `debug=True`: returns a plain `dict` (not a pydantic model) whose
+      items additionally carry `matchType`, `matchedField`, `score`, and
+      `tier`. Returning a plain dict here is deliberate: `router.py` wraps
+      it in a `JSONResponse` to bypass `response_model`, since the router's
+      declared `response_model=AutocompleteResponse` would otherwise strip
+      the debug-only fields.
+    """
     idx = registry.ensure_index(db)
     kw = sanitize_keyword(keyword)
     result = idx.search(kw, limit, offset=0)

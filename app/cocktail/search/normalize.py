@@ -75,6 +75,8 @@ def extract_choseong(s) -> str:
 
     E.g. extract_choseong("칼루아 밀크") == "ㅋㄹㅇㅁㅋ"
     """
+    if not s:
+        return ""
     s = unicodedata.normalize("NFC", s)
     s = s.lower()
     s = "".join(ch for ch in s if ch not in SEPARATORS)

@@ -10,10 +10,13 @@ index in its own memory -- there is no cross-process sharing or invalidation.
 
 from __future__ import annotations
 
+import logging
 import threading
 
 from app.cocktail.search.index import CocktailNameSearchIndex
 from app.cocktail.search.loader import load_documents
+
+logger = logging.getLogger(__name__)
 
 _index: CocktailNameSearchIndex | None = None
 _lock = threading.Lock()
@@ -45,10 +48,9 @@ def ensure_index(db) -> CocktailNameSearchIndex:
     where the index is already built; the lock only guards the rare
     first-build race so concurrent first requests build it exactly once.
 
-    The index is built completely BEFORE being assigned to the registry, in
-    a single statement -- if `load_documents`/`CocktailNameSearchIndex`
-    construction raises, the registry is left unchanged (still empty rather
-    than half-built).
+    The index is built completely BEFORE being assigned to the registry --
+    if `load_documents`/`CocktailNameSearchIndex` construction raises, the
+    registry is left unchanged (still empty rather than half-built).
 
     The global is read exactly once per code path into a local (`idx`),
     which is what's returned -- never re-reading `_index` after the lock is
@@ -56,6 +58,15 @@ def ensure_index(db) -> CocktailNameSearchIndex:
     could otherwise be observed mid-function (e.g. between a not-None check
     and the return), which previously risked an `AssertionError` or a stray
     `None` return.
+
+    A successful, non-empty build is logged at INFO with the document count
+    so an empty index is visible in the logs rather than silently latching.
+    If `load_documents` returns zero documents, the build is treated as
+    failed: a WARNING is logged and the registry is left unset (`_index`
+    stays `None`) so the next call retries against the DB instead of
+    publishing an empty snapshot that would serve `items: []` forever. The
+    just-built (empty) index is still returned for this call -- only
+    caching it is skipped.
     """
     global _index
     idx = _index
@@ -64,6 +75,14 @@ def ensure_index(db) -> CocktailNameSearchIndex:
     with _lock:
         idx = _index
         if idx is None:
-            idx = CocktailNameSearchIndex(load_documents(db))
-            _index = idx
+            docs = load_documents(db)
+            idx = CocktailNameSearchIndex(docs)
+            if docs:
+                _index = idx  # not set_index(): _lock is not reentrant
+                logger.info("search index built: %d documents", len(docs))
+            else:
+                logger.warning(
+                    "search index build returned 0 documents; leaving "
+                    "index unset so the next call retries"
+                )
         return idx
