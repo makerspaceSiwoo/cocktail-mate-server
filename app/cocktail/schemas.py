@@ -75,3 +75,14 @@ class DailyRecommendItem(BaseModel):
 
 class DailyRecommendResponse(BaseModel):
     items: list[DailyRecommendItem]
+
+
+class AutocompleteItem(BaseModel):
+    id: int
+    name: str
+    nameEn: str | None = None
+
+
+class AutocompleteResponse(BaseModel):
+    keyword: str
+    items: list[AutocompleteItem]

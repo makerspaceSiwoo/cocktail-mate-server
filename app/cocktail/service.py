@@ -9,6 +9,10 @@ from app.like.repository import LikeRepository
 
 from fastapi import HTTPException
 
+from app.cocktail.search import registry
+from app.cocktail.search.normalize import sanitize_keyword
+from app.cocktail.schemas import AutocompleteItem, AutocompleteResponse
+
 # MVP 기준 한국 시간(UTC+9)의 날짜를 오늘의 추천 시드로 사용한다.
 KST = timezone(timedelta(hours=9))
 
@@ -82,3 +86,51 @@ class CocktailService:
         )
 
         return cocktail
+
+
+def autocomplete(
+    db: Session,
+    keyword: str,
+    limit: int,
+    debug: bool,
+) -> AutocompleteResponse | dict:
+    """Run the cocktail name search core and shape the API response.
+
+    Response contract (binding -- do not fold into a shared item builder
+    without preserving this split):
+    - `debug=False` (normal): returns an `AutocompleteResponse` whose items
+      carry ONLY `id`, `name`, `nameEn`. `nameEn` is always present (may be
+      `None`).
+    - `debug=True`: returns a plain `dict` (not a pydantic model) whose
+      items additionally carry `matchType`, `matchedField`, `score`, and
+      `tier`. Returning a plain dict here is deliberate: `router.py` wraps
+      it in a `JSONResponse` to bypass `response_model`, since the router's
+      declared `response_model=AutocompleteResponse` would otherwise strip
+      the debug-only fields.
+    """
+    idx = registry.ensure_index(db)
+    kw = sanitize_keyword(keyword)
+    result = idx.search(kw, limit, offset=0)
+    if debug:
+        items = [
+            {
+                "id": hit.id,
+                "name": hit.name,
+                "nameEn": hit.name_en,
+                "matchType": hit.match_type,
+                "matchedField": hit.matched_field,
+                "score": hit.score,
+                "tier": hit.tier,
+            }
+            for hit in result.hits
+        ]
+        return {"keyword": kw, "items": items}
+    items_pydantic: list[AutocompleteItem] = [
+        AutocompleteItem(
+            id=hit.id,
+            name=hit.name,
+            nameEn=hit.name_en,
+        )
+        for hit in result.hits
+    ]
+    return AutocompleteResponse(keyword=kw, items=items_pydantic)

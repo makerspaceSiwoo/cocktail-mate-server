@@ -5,6 +5,7 @@
 """
 
 import logging
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -28,6 +29,8 @@ from slowapi import _rate_limit_exceeded_handler
 from cocktail_mate_db.models import Cocktail
 from app.core.database import SessionLocal
 
+logger = logging.getLogger("app")
+
 
 def _configure_logging(level_name: str) -> None:
     """`app.*` 로거를 stderr로 출력하도록 설정한다.
@@ -46,6 +49,26 @@ def _configure_logging(level_name: str) -> None:
     app_logger.propagate = False
 
 
+@asynccontextmanager
+async def _lifespan(app: FastAPI):
+    """Warm up the autocomplete index at startup (best-effort)."""
+    try:
+        from app.cocktail.search import registry  # noqa: PLC0415
+
+        db = SessionLocal()
+        try:
+            registry.ensure_index(db)
+            logger.info("Autocomplete index warmed up at startup.")
+        finally:
+            db.close()
+    except Exception:  # noqa: BLE001
+        logger.warning(
+            "Autocomplete index warm-up failed; will build lazily on first request.",
+            exc_info=True,
+        )
+    yield
+
+
 def create_app() -> FastAPI:
     settings = get_settings()
     _configure_logging(settings.log_level)
@@ -53,7 +76,7 @@ def create_app() -> FastAPI:
     # 토이 프로젝트 — 개발 편의 우선이라 production에서도 /docs·/redoc·/openapi.json 공개.
     # (민감 데이터 없음. 추후 필요하면 Basic Auth 등으로 보호 가능.)
     # @TODO 개발 완료 후 production에서 docs 접근 auth 추가
-    app = FastAPI(title="cocktail-mate-server")
+    app = FastAPI(title="cocktail-mate-server", lifespan=_lifespan)
 
     # ── Rate limiting (slowapi) ──
     app.state.limiter = limiter
