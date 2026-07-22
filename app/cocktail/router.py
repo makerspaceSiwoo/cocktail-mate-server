@@ -26,7 +26,7 @@ router = APIRouter(tags=["cocktail"])
 service = CocktailService()
 
 # 자동완성은 인증 없이 열려 있고 요청당 인덱스 전수 스캔 비용이 든다
-# (622건 기준 일반 1~2ms, MAX_LEN 입력 ~4ms). 프론트에서도 스로틀링하지만,
+# (622건 기준 일반 1~2ms, MAX_LEN 입력 ~5ms). 프론트에서도 스로틀링하지만,
 # 그건 클라이언트 선의에 의존하므로 서버에서 IP당 상한을 별도로 둔다.
 # 사람의 실제 타이핑에는 넉넉하고 단일 IP가 CPU를 포화시키지는 못하는 값.
 AUTOCOMPLETE_RATE_LIMIT = "120/minute"
