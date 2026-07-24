@@ -54,6 +54,46 @@ class CocktailRepository:
             },
         }
 
+    def list_by_ids(
+        self,
+        db: Session,
+        cocktail_ids: list[int],
+        liked_ids: set[int] | None = None,
+    ) -> list[dict]:
+        if not cocktail_ids:
+            return []
+
+        cocktails = db.query(Cocktail).filter(Cocktail.id.in_(cocktail_ids)).all()
+
+        cocktails_by_id = {cocktail.id: cocktail for cocktail in cocktails}
+
+        liked_ids = liked_ids or set()
+        items = []
+
+        # IN 쿼리 결과는 검색 순서를 보장하지 않으므로
+        # 검색 인덱스가 반환한 cocktail_ids 순서로 다시 조립한다.
+        for cocktail_id in cocktail_ids:
+            cocktail = cocktails_by_id.get(cocktail_id)
+
+            if cocktail is None:
+                continue
+
+            items.append(
+                {
+                    "id": cocktail.id,
+                    "name": cocktail.name,
+                    "nameEn": cocktail.name_en,
+                    "imageUrl": cocktail.image_url,
+                    "baseTag": cocktail.base_tag,
+                    "description": cocktail.description,
+                    "abv": cocktail.abv,
+                    "glass": cocktail.glass,
+                    "isLiked": cocktail.id in liked_ids,
+                }
+            )
+
+        return items
+
     def daily_cocktails(self, db: Session, seed: str, count: int) -> list[dict]:
         # seed(예: KST 날짜 'YYYY-MM-DD')로 결정론적 정렬 → 같은 날은 항상 같은 결과.
         cocktails = (
