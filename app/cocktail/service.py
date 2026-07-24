@@ -88,6 +88,57 @@ class CocktailService:
         return cocktail
 
 
+    def search_cocktails(
+        self,
+        db: Session,
+        keyword: str,
+        page: int,
+        rpp: int,
+        user_id: int | None = None,
+    ) -> dict:
+        keyword = sanitize_keyword(keyword)
+        offset = (page - 1) * rpp
+
+        index = registry.ensure_index(db)
+        search_result = index.search(
+            keyword=keyword,
+            limit=rpp,
+            offset=offset,
+        )
+
+        cocktail_ids = [hit.id for hit in search_result.hits]
+
+        liked_ids = (
+            self.like_repository.liked_cocktail_ids(db, user_id)
+            if user_id is not None
+            else None
+        )
+
+        items = self.repository.list_by_ids(
+            db=db,
+            cocktail_ids=cocktail_ids,
+            liked_ids=liked_ids,
+        )
+
+        like_counts = self.like_repository.like_counts_for(
+            db,
+            cocktail_ids,
+        )
+
+        for item in items:
+            item["likeCount"] = like_counts.get(item["id"], 0)
+
+        return {
+            "items": items,
+            "meta": {
+                "page": page,
+                "rpp": rpp,
+                "hasNextPage": (
+                    offset + len(search_result.hits) < search_result.total
+                ),
+            },
+        }
+
 def autocomplete(
     db: Session,
     keyword: str,
