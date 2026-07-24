@@ -63,16 +63,9 @@ class CocktailRepository:
         if not cocktail_ids:
             return []
 
-        cocktails = (
-            db.query(Cocktail)
-            .filter(Cocktail.id.in_(cocktail_ids))
-            .all()
-        )
+        cocktails = db.query(Cocktail).filter(Cocktail.id.in_(cocktail_ids)).all()
 
-        cocktails_by_id = {
-            cocktail.id: cocktail
-            for cocktail in cocktails
-        }
+        cocktails_by_id = {cocktail.id: cocktail for cocktail in cocktails}
 
         liked_ids = liked_ids or set()
         items = []

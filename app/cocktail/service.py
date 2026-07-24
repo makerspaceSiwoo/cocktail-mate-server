@@ -87,7 +87,6 @@ class CocktailService:
 
         return cocktail
 
-
     def search_cocktails(
         self,
         db: Session,
@@ -133,11 +132,10 @@ class CocktailService:
             "meta": {
                 "page": page,
                 "rpp": rpp,
-                "hasNextPage": (
-                    offset + len(search_result.hits) < search_result.total
-                ),
+                "hasNextPage": (offset + len(search_result.hits) < search_result.total),
             },
         }
+
 
 def autocomplete(
     db: Session,
