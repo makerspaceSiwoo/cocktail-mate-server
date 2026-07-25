@@ -86,3 +86,22 @@ def search_autocomplete(
         # (score, tier, matchedField) are preserved; response_model would strip them.
         return JSONResponse(content=jsonable_encoder(result))
     return result
+
+
+@router.get("/search", response_model=CocktailListResponse)
+def search_cocktails(
+    current_user: OptionalUser,
+    keyword: str = Query(...),
+    page: int = Query(1, ge=1),
+    rpp: int = Query(10, ge=1, le=50),
+    db: Session = Depends(get_db),
+):
+    user_id = current_user.id if current_user is not None else None
+
+    return service.search_cocktails(
+        db=db,
+        keyword=keyword,
+        page=page,
+        rpp=rpp,
+        user_id=user_id,
+    )
