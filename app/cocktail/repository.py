@@ -24,6 +24,8 @@ class CocktailRepository:
         if base:
             query = query.filter(Cocktail.base_tag == base)
 
+        total_count = query.count()
+
         cocktails = (
             query.order_by(Cocktail.id).offset((page - 1) * rpp).limit(rpp + 1).all()
         )
@@ -50,6 +52,7 @@ class CocktailRepository:
             "meta": {
                 "page": page,
                 "rpp": rpp,
+                "totalCount": total_count,
                 "hasNextPage": has_next_page,
             },
         }
