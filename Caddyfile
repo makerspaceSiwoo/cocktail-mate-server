@@ -20,7 +20,21 @@ api.cocktail-mate.com {
 			window 1m
 		}
 	}
-	reverse_proxy api:8000
+
+	# 부트 볼륨의 공개 이미지. /media/cocktails/foo.webp 요청은
+	# /srv/media/cocktails/foo.webp 파일로 매핑된다.
+	handle_path /media/* {
+		root * /srv/media
+		header {
+			Cache-Control "public, max-age=31536000, immutable"
+			X-Content-Type-Options "nosniff"
+		}
+		file_server
+	}
+
+	handle {
+		reverse_proxy api:8000
+	}
 	# Cloudflare Origin CA 인증서(15년). CF SSL 모드 Full(strict)가 이 인증서를 신뢰한다.
 	tls /etc/caddy/certs/cf-origin.pem /etc/caddy/certs/cf-origin-key.pem
 }
