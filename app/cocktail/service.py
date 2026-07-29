@@ -132,6 +132,7 @@ class CocktailService:
             "meta": {
                 "page": page,
                 "rpp": rpp,
+                "totalCount": search_result.total,
                 "hasNextPage": (offset + len(search_result.hits) < search_result.total),
             },
         }
