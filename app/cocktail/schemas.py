@@ -52,6 +52,7 @@ class CocktailListItem(BaseModel):
 class CocktailListMeta(BaseModel):
     page: int
     rpp: int
+    totalCount: int
     hasNextPage: bool
 
 
