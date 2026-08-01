@@ -1,5 +1,8 @@
 """Offline heterogeneous graph training for taste-list query embeddings."""
 
+# TODO: 재료 임베딩 학습 필요. 현재 재료 경로는 보조 손실에만 사용하며,
+# DB에서 사용할 재료별 32D 임베딩은 학습 산출물로 내보내거나 동기화하지 않는다.
+
 from __future__ import annotations
 
 import random
