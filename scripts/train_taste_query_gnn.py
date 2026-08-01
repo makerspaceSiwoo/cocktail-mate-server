@@ -1,4 +1,4 @@
-"""Train and synchronize the taste-list virtual cocktail graph decoder."""
+"""Train the taste-list virtual cocktail graph decoder from local CSV data."""
 
 from __future__ import annotations
 
@@ -8,7 +8,6 @@ from pathlib import Path
 
 import numpy as np
 from sqlalchemy import select
-from sqlalchemy.dialects.postgresql import insert
 
 from app.embedding_pipeline.core import load_vector_artifact, read_taste_dataset
 from app.taste_query.training import (
@@ -27,7 +26,6 @@ DEFAULT_MODEL = (
     / "taste-query-gnn.npz"
 )
 DEFAULT_METRICS = DEFAULT_MODEL.with_suffix(".metrics.json")
-DEFAULT_EDGES = DEFAULT_MODEL.with_suffix(".edges.json")
 
 
 def _ingredient_weight(amount: float | None, unit: str | None) -> float:
@@ -150,71 +148,9 @@ def train(arguments: argparse.Namespace) -> dict:
     }
     report = result.report | {"single_descriptor_queries": descriptor_evaluation}
     _write_json(arguments.metrics, report)
-    _write_json(arguments.edges, {"edges": edge_rows})
     return report | {
         "model_output": str(arguments.output),
         "metrics_output": str(arguments.metrics),
-        "edges_output": str(arguments.edges),
-        "database_updated": False,
-    }
-
-
-def sync_db(arguments: argparse.Namespace) -> dict:
-    from cocktail_mate_db.models import (  # noqa: PLC0415
-        CocktailTasteDescriptor,
-        TasteDescriptor,
-    )
-
-    from app.core.database import SessionLocal  # noqa: PLC0415
-
-    payload = json.loads(arguments.edges.read_text(encoding="utf-8"))
-    rows = payload["edges"]
-    with SessionLocal() as session:
-        descriptors = session.execute(
-            select(TasteDescriptor.id, TasteDescriptor.code)
-        ).all()
-        descriptor_ids = {row.code: int(row.id) for row in descriptors}
-        mappings = [
-            {
-                "cocktail_id": int(row["cocktail_id"]),
-                "descriptor_id": descriptor_ids[code],
-                "weight": 1.0,
-                "source": "embedding_text",
-            }
-            for row in rows
-            for code in row["descriptor_codes"]
-        ]
-        missing_codes = sorted(
-            {
-                code
-                for row in rows
-                for code in row["descriptor_codes"]
-                if code not in descriptor_ids
-            }
-        )
-        if missing_codes:
-            raise ValueError(f"DB is missing taste descriptor codes: {missing_codes}")
-        if arguments.commit:
-            statement = insert(CocktailTasteDescriptor).values(mappings)
-            session.execute(
-                statement.on_conflict_do_update(
-                    index_elements=(
-                        CocktailTasteDescriptor.cocktail_id,
-                        CocktailTasteDescriptor.descriptor_id,
-                    ),
-                    set_={
-                        "weight": statement.excluded.weight,
-                        "source": statement.excluded.source,
-                    },
-                )
-            )
-            session.commit()
-        else:
-            session.rollback()
-    return {
-        "validated_edges": len(mappings),
-        "updated_edges": len(mappings) if arguments.commit else 0,
-        "committed": arguments.commit,
     }
 
 
@@ -234,22 +170,18 @@ def build_parser() -> argparse.ArgumentParser:
     )
     training.add_argument("--output", type=Path, default=DEFAULT_MODEL)
     training.add_argument("--metrics", type=Path, default=DEFAULT_METRICS)
-    training.add_argument("--edges", type=Path, default=DEFAULT_EDGES)
     training.add_argument("--hidden-dim", type=int, default=96)
     training.add_argument("--epochs", type=int, default=1600)
     training.add_argument("--patience", type=int, default=250)
     training.add_argument("--restarts", type=int, default=3)
     training.add_argument("--seed", type=int, default=20260801)
     training.add_argument("--device", default="cpu")
-    synchronize = subparsers.add_parser("sync-db")
-    synchronize.add_argument("--edges", type=Path, default=DEFAULT_EDGES)
-    synchronize.add_argument("--commit", action="store_true")
     return parser
 
 
 def main() -> int:
     arguments = build_parser().parse_args()
-    result = train(arguments) if arguments.command == "train" else sync_db(arguments)
+    result = train(arguments)
     print(json.dumps(result, ensure_ascii=False, indent=2))
     return 0
 

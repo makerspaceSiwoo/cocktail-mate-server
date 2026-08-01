@@ -1,4 +1,4 @@
-.PHONY: up up-d require-env down logs rebuild shell check test format format-check prod-up prod-down hooks ssh-check image-preflight image-generate image-logs image-status image-export-prompts image-batch-prepare image-batch-status image-batch-download image-batch-wait image-upload-batch embedding-install embedding-preflight embedding-run embedding-cluster-surface embedding-apply-db taste-query-train taste-query-sync-db
+.PHONY: up up-d require-env down logs rebuild shell check test format format-check prod-up prod-down hooks ssh-check image-preflight image-generate image-logs image-status image-export-prompts image-batch-prepare image-batch-status image-batch-download image-batch-wait image-upload-batch embedding-install embedding-preflight embedding-run embedding-cluster-surface embedding-apply-db taste-query-train
 
 PYTHON ?= $(shell if [ -x .venv/bin/python ]; then echo .venv/bin/python; else echo python3; fi)
 
@@ -114,10 +114,6 @@ embedding-apply-db:
 
 taste-query-train:
 	$(PYTHON) -m scripts.train_taste_query_gnn train
-
-# 기본은 edge 검증만 수행한다. 실제 반영은 직접 --commit을 붙여 실행한다.
-taste-query-sync-db:
-	$(PYTHON) -m scripts.train_taste_query_gnn sync-db
 
 # --- Git hooks (최초 1회 실행) ---
 # 브랜치명 검증(pre-commit) + main push 차단·ruff 포맷/린트·build 체크(pre-push) 활성화

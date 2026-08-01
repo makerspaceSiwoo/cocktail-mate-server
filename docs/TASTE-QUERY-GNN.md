@@ -56,16 +56,14 @@
 
 - `app/taste_query/artifacts/taste-query-gnn.npz`: NumPy 추론용 모델
 - `app/taste_query/artifacts/taste-query-gnn.metrics.json`: 학습 및 평가 지표
-- `app/taste_query/artifacts/taste-query-gnn.edges.json`: DB 동기화용 칵테일-맛 간선
 
 ## DB 구조
 
-Alembic revision은 `c91e2ad4078f`이다.
+Alembic revision은 `6fd54a9c81e2`이다.
 
 - `taste_descriptors`: 코드, 한국어 표시명, 카테고리, 노출 순서, 활성 상태
-- `cocktail_taste_descriptors`: 학습에 사용된 칵테일-맛 간선과 출처
 
-`taste_descriptor_conflicts` 테이블은 제거했다. 상충 쌍을 별도로 관리하지 않고 모든 카테고리에 동일하게 최대 한 개만 선택할 수 있다.
+`taste_descriptor_conflicts`와 `cocktail_taste_descriptors` 테이블은 제거했다. 상충 쌍이나 칵테일별 학습 간선을 DB에 중복 저장하지 않고, 모든 카테고리에 동일하게 최대 한 개만 선택할 수 있다. 칵테일-맛 학습 간선은 로컬 CSV에서 매번 구성한다.
 
 ## API
 
@@ -146,7 +144,7 @@ Content-Type: application/json
 
 유효하지 않은 ID, 중복 ID, 같은 카테고리의 복수 선택은 `422` 응답을 반환한다. 모델 파일이 없거나 읽을 수 없으면 `503`을 반환한다.
 
-## 재학습과 DB 동기화
+## 재학습
 
 서버의 `.env.local`에 DB 연결 정보가 준비된 상태에서 실행한다.
 
@@ -156,13 +154,6 @@ set -a
 source .env.local
 set +a
 make taste-query-train
-make taste-query-sync-db
 ```
 
-`taste-query-sync-db`는 기본적으로 dry-run이다. 검증 후 실제 반영은 다음과 같이 명시적으로 수행한다.
-
-```bash
-.venv/bin/python -m scripts.train_taste_query_gnn sync-db --commit
-```
-
-동기화는 `(cocktail_id, descriptor_id)`를 키로 upsert하므로 기존에 없는 간선을 임의로 삭제하지 않는다.
+맛 표현과 칵테일의 학습 관계는 `taste-data/cocktail-taste-descriptions.csv`에서 구성하며 DB로 동기화하지 않는다.
