@@ -1,4 +1,4 @@
-.PHONY: up up-d require-env down logs rebuild shell check test format format-check prod-up prod-down hooks ssh-check image-preflight image-generate image-logs image-status image-export-prompts image-batch-prepare image-batch-status image-batch-download image-batch-wait image-upload-batch
+.PHONY: up up-d require-env down logs rebuild shell check test format format-check prod-up prod-down hooks ssh-check image-preflight image-generate image-logs image-status image-export-prompts image-batch-prepare image-batch-status image-batch-download image-batch-wait image-upload-batch embedding-install embedding-preflight embedding-run embedding-cluster-surface embedding-apply-db taste-query-train taste-query-sync-db
 
 PYTHON ?= $(shell if [ -x .venv/bin/python ]; then echo .venv/bin/python; else echo python3; fi)
 
@@ -16,11 +16,11 @@ require-env:
 	@echo "▶ env_file: $(ENV_FILE)"
 
 # Docker 실행 (foreground)
-up: ssh-check require-env
+up: require-env
 	ENV_FILE=$(ENV_FILE) docker compose up --build
 
 # 백그라운드 실행
-up-d: ssh-check require-env
+up-d: require-env
 	ENV_FILE=$(ENV_FILE) docker compose up -d --build
 
 # 종료
@@ -94,6 +94,30 @@ image-batch-wait:
 
 image-upload-batch:
 	$(PYTHON) -m scripts.upload_cocktail_images
+
+# --- 로컬 맛 임베딩/축소/3D 실험(프로덕션 API 이미지와 분리) ---
+embedding-install:
+	$(PYTHON) -m pip install -r requirements-embedding.txt
+
+embedding-preflight:
+	$(PYTHON) -m scripts.build_cocktail_embeddings preflight
+
+embedding-run:
+	$(PYTHON) -m scripts.build_cocktail_embeddings run-all
+
+embedding-cluster-surface:
+	$(PYTHON) -m scripts.build_cocktail_embeddings experiment-cluster-surface
+
+# 기본은 read-only DB 검증. 실제 반영은 직접 --commit을 붙여 실행한다.
+embedding-apply-db:
+	$(PYTHON) -m scripts.build_cocktail_embeddings apply-db
+
+taste-query-train:
+	$(PYTHON) -m scripts.train_taste_query_gnn train
+
+# 기본은 edge 검증만 수행한다. 실제 반영은 직접 --commit을 붙여 실행한다.
+taste-query-sync-db:
+	$(PYTHON) -m scripts.train_taste_query_gnn sync-db
 
 # --- Git hooks (최초 1회 실행) ---
 # 브랜치명 검증(pre-commit) + main push 차단·ruff 포맷/린트·build 체크(pre-push) 활성화

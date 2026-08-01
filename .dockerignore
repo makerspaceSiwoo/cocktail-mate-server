@@ -1,0 +1,19 @@
+.git
+.gitignore
+.env
+.env.*
+.venv
+**/__pycache__
+**/*.py[cod]
+.pytest_cache
+.ruff_cache
+.mypy_cache
+.claude
+.superpowers
+
+# 오프라인 생성·학습 데이터와 로컬 미디어는 API 이미지에 포함하지 않는다.
+embedding-models
+embedding-artifacts
+taste-data
+image-upload
+caddy/certs

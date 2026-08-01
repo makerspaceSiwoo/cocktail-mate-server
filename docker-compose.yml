@@ -6,8 +6,11 @@ services:
 
   api:
     build:
+      # 로컬에서는 인접 cocktail-mate-db의 미커밋 모델까지 함께 빌드한다.
       context: .
-      ssh: ["default"]   # cocktail-mate-db(private) 설치용 — 호스트 ssh-agent의 GitHub 키 사용
+      dockerfile: Dockerfile.local
+      additional_contexts:
+        cocktail_mate_db: ../cocktail-mate-db
     container_name: fastapi-server
     # 개발 전용 핫리로드: 아래 볼륨 마운트(.:/app)로 호스트 코드 변경이 컨테이너에 즉시 반영되고,
     # uvicorn --reload 가 app/ 을 감시하다 .py 변경 시 서버를 자동 재기동한다.
