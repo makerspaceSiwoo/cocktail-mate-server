@@ -146,13 +146,13 @@ def test_correction_prompt_names_selected_flavor_notes() -> None:
 
 def test_correction_prompt_keeps_feedback_from_previous_attempts() -> None:
     missing_light_body = json.loads(_profile_json())
-    missing_light_body["embedding_text"] = missing_light_body[
-        "embedding_text"
-    ].replace("라이트하고 산뜻한", "매끄러운")
+    missing_light_body["embedding_text"] = missing_light_body["embedding_text"].replace(
+        "라이트하고 산뜻한", "매끄러운"
+    )
     missing_alcohol = json.loads(_profile_json())
-    missing_alcohol["embedding_text"] = missing_alcohol[
-        "embedding_text"
-    ].replace("선명한 스피릿 열감", "깔끔한 풍미")
+    missing_alcohol["embedding_text"] = missing_alcohol["embedding_text"].replace(
+        "선명한 스피릿 열감", "깔끔한 풍미"
+    )
     client = FakeClient(
         [
             json.dumps(missing_light_body, ensure_ascii=False),

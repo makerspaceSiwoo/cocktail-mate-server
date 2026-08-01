@@ -121,9 +121,7 @@ class GeminiTasteGateway:
             if feedback not in feedback_history:
                 feedback_history.append(feedback)
             cumulative_feedback = "; ".join(feedback_history)
-            correction_guidance = _correction_guidance(
-                cumulative_feedback, output_text
-            )
+            correction_guidance = _correction_guidance(cumulative_feedback, output_text)
             logger.warning(
                 "Gemini taste profile failed validation; requesting correction "
                 "(%s/%s): %s",
