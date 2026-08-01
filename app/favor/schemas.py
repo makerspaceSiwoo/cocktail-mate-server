@@ -7,3 +7,4 @@ class FavorItem(BaseModel):
     id: int
     name: str
     similarity: float
+    imageUrl: str | None = None

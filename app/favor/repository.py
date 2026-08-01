@@ -37,7 +37,7 @@ class FavorRepository:
         if exclude_ids:
             conditions.append(Cocktail.id.notin_(exclude_ids))
         rows = db.execute(
-            select(Cocktail.id, Cocktail.name, dist.label("dist"))
+            select(Cocktail.id, Cocktail.name, Cocktail.image_url, dist.label("dist"))
             .where(*conditions)
             .order_by(dist)
             .limit(limit)
@@ -47,6 +47,7 @@ class FavorRepository:
                 "id": row.id,
                 "name": row.name,
                 "similarity": round(1.0 - float(row.dist), 4),
+                "imageUrl": row.image_url,
             }
             for row in rows
         ]
