@@ -7,3 +7,4 @@ class RecommendItem(BaseModel):
     id: int
     name: str
     similarity: float
+    imageUrl: str | None = None

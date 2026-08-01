@@ -26,7 +26,7 @@ class RecommendRepository:
         # 코사인 거리식을 SELECT/WHERE/ORDER BY 에서 재사용 (거리 <= 임계치 → 클러스터 이탈 방지).
         dist = Cocktail.embedding.cosine_distance(target_embedding)
         rows = db.execute(
-            select(Cocktail.id, Cocktail.name, dist.label("dist"))
+            select(Cocktail.id, Cocktail.name, Cocktail.image_url, dist.label("dist"))
             .where(
                 Cocktail.embedding.isnot(None),
                 Cocktail.id != exclude_id,
@@ -40,6 +40,7 @@ class RecommendRepository:
                 "id": row.id,
                 "name": row.name,
                 "similarity": round(1.0 - float(row.dist), 4),
+                "imageUrl": row.image_url,
             }
             for row in rows
         ]
