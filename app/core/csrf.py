@@ -30,6 +30,7 @@ from app.core.config import Settings
 
 _SAFE_METHODS = frozenset({"GET", "HEAD", "OPTIONS", "TRACE"})
 _LOCALHOST_ORIGIN_RE = re.compile(r"https?://(localhost|127\.0\.0\.1)(:\d+)?$")
+_BEARER_ONLY_PATHS = frozenset({"/admin/cocktail-images/batch"})
 
 
 class CSRFOriginMiddleware(BaseHTTPMiddleware):
@@ -56,6 +57,14 @@ class CSRFOriginMiddleware(BaseHTTPMiddleware):
 
     async def dispatch(self, request: Request, call_next):
         if request.method not in _SAFE_METHODS:
+            # 이 관리 API는 쿠키가 아닌 별도 Bearer 키만 인증에 사용한다.
+            # Origin 없는 서버 간 배치 요청을 허용하되 키 검증은 라우터가 수행한다.
+            authorization = request.headers.get("authorization", "")
+            if (
+                request.url.path in _BEARER_ONLY_PATHS
+                and authorization.lower().startswith("bearer ")
+            ):
+                return await call_next(request)
             origin = request.headers.get("origin")
             if origin is None:
                 # Origin 없는 unsafe 요청: production 은 거부, 로컬/개발은 허용.

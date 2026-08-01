@@ -6,6 +6,7 @@
 import re
 from functools import lru_cache
 
+from pydantic import SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -60,6 +61,10 @@ class Settings(BaseSettings):
     google_client_id: str = ""
     google_client_secret: str = ""
     google_redirect_uri: str = "http://localhost:8000/auth/google/callback"
+
+    # ---- 관리자 이미지 업로드 ----
+    # 로컬 배치 클라이언트와 서버에 동일한 고엔트로피 Bearer 키를 설정한다.
+    cocktail_image_upload_api_key: SecretStr = SecretStr("")
 
     # ---- 쿠키 ----
     # 쿠키 flag(secure/samesite)는 요청 Origin 기준으로 동적 결정된다

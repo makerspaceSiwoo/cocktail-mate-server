@@ -1,4 +1,6 @@
-.PHONY: up up-d require-env down logs rebuild shell check format format-check prod-up prod-down hooks ssh-check
+.PHONY: up up-d require-env down logs rebuild shell check test format format-check prod-up prod-down hooks ssh-check image-preflight image-generate image-logs image-status image-export-prompts image-batch-prepare image-batch-status image-batch-download image-batch-wait image-upload-batch
+
+PYTHON ?= $(shell if [ -x .venv/bin/python ]; then echo .venv/bin/python; else echo python3; fi)
 
 # 빌드 전 GitHub SSH 인증 점검 (cocktail-mate-db private 레포 설치 전제)
 ssh-check:
@@ -35,7 +37,11 @@ shell:
 
 # 컴파일 체크
 check:
-	docker compose exec api python -m compileall app
+	docker compose exec api python -m compileall app scripts
+
+# 단위 테스트 (실제 Gemini/NVIDIA/DB 호출은 mock 처리)
+test:
+	pytest -q
 
 # 코드 포맷팅 (ruff — 로컬 venv/시스템 ruff 사용). 자동 정리.
 format:
@@ -57,6 +63,37 @@ prod-up:
 # 배포 종료
 prod-down:
 	docker compose -f docker-compose.prod.yml down
+
+# --- 칵테일 이미지 생성기(프로덕션 서버) ---
+image-preflight:
+	docker compose -f docker-compose.prod.yml --profile image-generation run --rm image-generator python -m scripts.generate_cocktail_images preflight
+
+image-generate:
+	docker compose -f docker-compose.prod.yml --profile image-generation up -d --force-recreate image-generator
+
+image-logs:
+	docker compose -f docker-compose.prod.yml --profile image-generation logs -f image-generator
+
+image-status:
+	docker compose -f docker-compose.prod.yml --profile image-generation run --rm image-generator python -m scripts.generate_cocktail_images status
+
+image-export-prompts:
+	$(PYTHON) -m scripts.export_cocktail_image_prompts
+
+image-batch-prepare:
+	$(PYTHON) -m scripts.generate_cocktail_images_batch prepare
+
+image-batch-status:
+	$(PYTHON) -m scripts.generate_cocktail_images_batch status
+
+image-batch-download:
+	$(PYTHON) -m scripts.generate_cocktail_images_batch download
+
+image-batch-wait:
+	$(PYTHON) -m scripts.generate_cocktail_images_batch wait-download
+
+image-upload-batch:
+	$(PYTHON) -m scripts.upload_cocktail_images
 
 # --- Git hooks (최초 1회 실행) ---
 # 브랜치명 검증(pre-commit) + main push 차단·ruff 포맷/린트·build 체크(pre-push) 활성화

@@ -37,6 +37,24 @@ services:
       - .env
     extra_hosts:
       - "host.docker.internal:host-gateway"   # 같은 인스턴스의 DB(5432)로 접속
+    volumes:
+      - /srv/cocktail-mate/media/cocktails:/srv/cocktail-mate/media/cocktails
+
+  # 수동 실행하는 resumable one-shot 이미지 생성기.
+  # `make image-generate` 때만 profile이 활성화되며 API 서비스와 독립적으로 종료된다.
+  image-generator:
+    image: ${API_IMAGE:-ghcr.io/makerspacesiwoo/cocktail-mate-server:latest}
+    container_name: cocktail-image-generator
+    profiles: ["image-generation"]
+    restart: "no"
+    command: ["python", "-m", "scripts.generate_cocktail_images", "run"]
+    env_file:
+      - .env
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - /srv/cocktail-mate/media/cocktails:/srv/cocktail-mate/media/cocktails
+      - /srv/cocktail-mate/image-generation-state:/srv/cocktail-mate/image-generation-state
 
 volumes:
   caddy_data:
