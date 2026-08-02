@@ -58,6 +58,10 @@ class CocktailService:
         seed = datetime.now(KST).strftime("%Y-%m-%d")
         return {"items": self.repository.daily_cocktails(db, seed, count)}
 
+    def ranking(self, db: Session, limit: int = 5) -> dict:
+        # 전체 좋아요 수 기준 상위 limit개 (좋아요 랭킹).
+        return {"items": self.repository.ranking_by_likes(db, limit)}
+
     def get_detail(
         self,
         db: Session,

@@ -14,6 +14,7 @@ from app.cocktail.schemas import (
     DailyRecommendResponse,
     CocktailListResponse,
     BaseTagListResponse,
+    RankingResponse,
 )
 from app.cocktail import service as cocktail_service
 from app.cocktail.service import CocktailService
@@ -57,6 +58,14 @@ def cocktail_list(
 @router.get("/daily-recommend", response_model=DailyRecommendResponse)
 def daily_recommend(db: Session = Depends(get_db)):
     return service.daily_recommend(db)
+
+
+@router.get("/ranking", response_model=RankingResponse)
+def cocktail_ranking(
+    limit: int = Query(5, ge=1, le=20),
+    db: Session = Depends(get_db),
+):
+    return service.ranking(db, limit)
 
 
 @router.get("/cocktail/{id}", response_model=CocktailDetailResponse)
