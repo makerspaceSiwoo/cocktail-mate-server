@@ -1,0 +1,10 @@
+# 오프라인 칵테일 임베딩 생성/축소/3D 실험 전용.
+# API 서버 이미지에는 설치하지 않는다.
+numpy>=2.0.0,<3.0.0
+scipy>=1.13.0,<2.0.0
+scikit-learn>=1.5.0,<2.0.0
+torch>=2.7.0,<3.0.0
+sentence-transformers>=5.0.0,<6.0.0
+huggingface-hub>=0.34.0,<2.0.0
+safetensors>=0.5.0,<1.0.0
+umap-learn>=0.5.7,<0.6.0

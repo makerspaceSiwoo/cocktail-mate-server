@@ -10,7 +10,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends git openssh-cli
 RUN mkdir -p -m 0700 ~/.ssh && ssh-keyscan github.com >> ~/.ssh/known_hosts
 
 # psycopg2-binary, boto3 등은 wheel로 설치되어 빌드 도구가 필요 없다.
-COPY requirements.txt .
+COPY requirements-base.txt requirements.txt ./
 
 RUN --mount=type=ssh pip install --no-cache-dir -r requirements.txt
 

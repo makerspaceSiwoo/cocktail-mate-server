@@ -1,0 +1,18 @@
+fastapi
+numpy>=2.0.0,<3.0.0
+uvicorn[standard]
+sqlalchemy
+psycopg2-binary
+pgvector
+python-dotenv
+pydantic-settings
+# 인증(JWT 쿠키) — access/refresh 발급, rate limit, 소셜(카카오) HTTP 호출
+python-jose[cryptography]
+slowapi
+httpx
+# 검색 자동완성 — 한글 호환 자모 분해 / 부분 문자열 유사도
+jamo==0.4.1
+rapidfuzz==3.14.5
+# 칵테일 카탈로그 이미지 배치 — Gemini 프롬프트 + 수동 업로드/WebP 파생본.
+google-genai>=2.3.0,<3.0.0
+Pillow>=11.0.0,<13.0.0

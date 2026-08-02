@@ -37,6 +37,10 @@ services:
       - .env
     extra_hosts:
       - "host.docker.internal:host-gateway"   # 같은 인스턴스의 DB(5432)로 접속
+    volumes:
+      - /srv/cocktail-mate/media/cocktails:/srv/cocktail-mate/media/cocktails
+      # 외부 HTTP 업로드 대신 서버에 복사한 배치 입력을 내부 스크립트가 읽는다.
+      - /srv/cocktail-mate/image-upload:/app/image-upload:ro
 
 volumes:
   caddy_data:

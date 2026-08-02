@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
-from sqlalchemy import select, text
+from sqlalchemy import func, select, text
 from sqlalchemy.orm import Session
 
-from cocktail_mate_db.models import Cocktail
+from cocktail_mate_db.models import (
+    Cocktail,
+    TasteDescriptor,
+)
 
 
 class RecommendRepository:
@@ -26,7 +29,15 @@ class RecommendRepository:
         # 코사인 거리식을 SELECT/WHERE/ORDER BY 에서 재사용 (거리 <= 임계치 → 클러스터 이탈 방지).
         dist = Cocktail.embedding.cosine_distance(target_embedding)
         rows = db.execute(
-            select(Cocktail.id, Cocktail.name, Cocktail.image_url, dist.label("dist"))
+            select(
+                Cocktail.id,
+                Cocktail.name,
+                Cocktail.name_en,
+                Cocktail.description,
+                Cocktail.image_url,
+                Cocktail.abv,
+                dist.label("dist"),
+            )
             .where(
                 Cocktail.embedding.isnot(None),
                 Cocktail.id != exclude_id,
@@ -39,8 +50,97 @@ class RecommendRepository:
             {
                 "id": row.id,
                 "name": row.name,
-                "similarity": round(1.0 - float(row.dist), 4),
+                "nameEn": row.name_en,
+                "description": row.description,
                 "imageUrl": row.image_url,
+                "abv": row.abv,
+                "similarity": round(1.0 - float(row.dist), 4),
+            }
+            for row in rows
+        ]
+
+    def list_taste_descriptors(self, db: Session) -> list[TasteDescriptor]:
+        return list(
+            db.scalars(
+                select(TasteDescriptor)
+                .where(TasteDescriptor.is_active.is_(True))
+                .order_by(TasteDescriptor.display_order, TasteDescriptor.id)
+            ).all()
+        )
+
+    def random_cocktails(self, db: Session, limit: int) -> list[dict]:
+        rows = db.execute(
+            select(
+                Cocktail.id,
+                Cocktail.name,
+                Cocktail.name_en,
+                Cocktail.description,
+                Cocktail.image_url,
+                Cocktail.abv,
+            )
+            .order_by(func.random())
+            .limit(limit)
+        ).all()
+        return [
+            {
+                "id": row.id,
+                "name": row.name,
+                "nameEn": row.name_en,
+                "description": row.description,
+                "imageUrl": row.image_url,
+                "abv": row.abv,
+                "similarity": 0.0,
+            }
+            for row in rows
+        ]
+
+    def active_taste_descriptors_by_ids(
+        self,
+        db: Session,
+        descriptor_ids: list[int],
+    ) -> list[TasteDescriptor]:
+        return list(
+            db.scalars(
+                select(TasteDescriptor)
+                .where(
+                    TasteDescriptor.id.in_(descriptor_ids),
+                    TasteDescriptor.is_active.is_(True),
+                )
+                .order_by(TasteDescriptor.display_order, TasteDescriptor.id)
+            ).all()
+        )
+
+    def nearest_for_virtual_taste(
+        self,
+        db: Session,
+        target_embedding,
+        limit: int,
+    ) -> list[dict]:
+        db.execute(text("SET LOCAL hnsw.iterative_scan = relaxed_order"))
+        distance = Cocktail.embedding.cosine_distance(target_embedding)
+        rows = db.execute(
+            select(
+                Cocktail.id,
+                Cocktail.name,
+                Cocktail.name_en,
+                Cocktail.description,
+                Cocktail.image_url,
+                Cocktail.abv,
+                distance.label("dist"),
+            )
+            .where(Cocktail.embedding.isnot(None))
+            .order_by(distance)
+            .limit(limit)
+        ).all()
+        return [
+            {
+                "id": row.id,
+                "name": row.name,
+                "nameEn": row.name_en,
+                "description": row.description,
+                "imageUrl": row.image_url,
+                "abv": row.abv,
+                "similarity": round(1.0 - float(row.dist), 4),
             }
             for row in rows
         ]

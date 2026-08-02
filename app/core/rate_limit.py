@@ -10,6 +10,19 @@ from __future__ import annotations
 
 from slowapi import Limiter
 from slowapi.util import get_remote_address
+from starlette.requests import Request
 
 # 기본 key: 클라이언트 IP.
 limiter = Limiter(key_func=get_remote_address)
+
+
+def get_proxy_client_ip(request: Request) -> str:
+    """Resolve the real client behind the production Cloudflare/Caddy chain."""
+
+    cloudflare_ip = request.headers.get("cf-connecting-ip", "").strip()
+    if cloudflare_ip:
+        return cloudflare_ip
+    forwarded_for = request.headers.get("x-forwarded-for", "")
+    if forwarded_for:
+        return forwarded_for.split(",", 1)[0].strip()
+    return get_remote_address(request)

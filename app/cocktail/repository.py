@@ -4,10 +4,10 @@
 (생성자에서 `Session`을 주입받는 형태로 확장 예정).
 """
 
-from sqlalchemy import func
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from cocktail_mate_db.models import Cocktail, CocktailIngredient, Ingredient
+from cocktail_mate_db.models import Cocktail, CocktailIngredient, Ingredient, Like
 
 
 class CocktailRepository:
@@ -116,6 +116,33 @@ class CocktailRepository:
                 "imageUrl": cocktail.image_url,
             }
             for cocktail in cocktails
+        ]
+
+    def ranking_by_likes(self, db: Session, limit: int) -> list[dict]:
+        """전체 좋아요 수 기준 상위 칵테일. 좋아요가 없는 칵테일(0)도 포함해
+        상위 N개를 채운다. 동점은 id 오름차순으로 결정론적 정렬한다."""
+        like_count = func.count(Like.cocktail_id)
+        rows = db.execute(
+            select(
+                Cocktail.id,
+                Cocktail.name,
+                Cocktail.image_url,
+                like_count.label("like_count"),
+            )
+            .outerjoin(Like, Like.cocktail_id == Cocktail.id)
+            .group_by(Cocktail.id, Cocktail.name, Cocktail.image_url)
+            .order_by(like_count.desc(), Cocktail.id)
+            .limit(limit)
+        ).all()
+
+        return [
+            {
+                "id": row.id,
+                "name": row.name,
+                "imageUrl": row.image_url,
+                "likeCount": row.like_count,
+            }
+            for row in rows
         ]
 
     def get_base_tags(self, db: Session) -> dict:

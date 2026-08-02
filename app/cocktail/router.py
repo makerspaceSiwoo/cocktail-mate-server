@@ -3,7 +3,7 @@
 경로/응답은 기존 단일 파일 구현과 동일하게 유지한다 (prefix 없음).
 """
 
-from fastapi import APIRouter, Depends, Query, Request
+from fastapi import APIRouter, Depends, Query, Request, Response
 from fastapi.encoders import jsonable_encoder
 from fastapi.responses import JSONResponse
 
@@ -14,6 +14,7 @@ from app.cocktail.schemas import (
     DailyRecommendResponse,
     CocktailListResponse,
     BaseTagListResponse,
+    RankingResponse,
 )
 from app.cocktail import service as cocktail_service
 from app.cocktail.service import CocktailService
@@ -57,6 +58,17 @@ def cocktail_list(
 @router.get("/daily-recommend", response_model=DailyRecommendResponse)
 def daily_recommend(db: Session = Depends(get_db)):
     return service.daily_recommend(db)
+
+
+@router.get("/ranking", response_model=RankingResponse)
+def cocktail_ranking(
+    response: Response,
+    limit: int = Query(5, ge=1, le=20),
+    db: Session = Depends(get_db),
+):
+    # 좋아요 랭킹은 자주 바뀌지 않으므로 응답을 1시간 캐시한다.
+    response.headers["Cache-Control"] = "public, max-age=3600"
+    return service.ranking(db, limit)
 
 
 @router.get("/cocktail/{id}", response_model=CocktailDetailResponse)
