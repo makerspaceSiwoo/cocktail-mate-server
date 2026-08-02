@@ -6,8 +6,10 @@ from pydantic import BaseModel, Field, field_validator
 class RecommendItem(BaseModel):
     id: int
     name: str
+    nameEn: str | None = None
     description: str | None = None
     imageUrl: str | None = None
+    abv: float | None = None
     similarity: float
 
 

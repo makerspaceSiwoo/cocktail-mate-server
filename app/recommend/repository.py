@@ -32,8 +32,10 @@ class RecommendRepository:
             select(
                 Cocktail.id,
                 Cocktail.name,
+                Cocktail.name_en,
                 Cocktail.description,
                 Cocktail.image_url,
+                Cocktail.abv,
                 dist.label("dist"),
             )
             .where(
@@ -48,8 +50,10 @@ class RecommendRepository:
             {
                 "id": row.id,
                 "name": row.name,
+                "nameEn": row.name_en,
                 "description": row.description,
                 "imageUrl": row.image_url,
+                "abv": row.abv,
                 "similarity": round(1.0 - float(row.dist), 4),
             }
             for row in rows
@@ -69,8 +73,10 @@ class RecommendRepository:
             select(
                 Cocktail.id,
                 Cocktail.name,
+                Cocktail.name_en,
                 Cocktail.description,
                 Cocktail.image_url,
+                Cocktail.abv,
             )
             .order_by(func.random())
             .limit(limit)
@@ -79,8 +85,10 @@ class RecommendRepository:
             {
                 "id": row.id,
                 "name": row.name,
+                "nameEn": row.name_en,
                 "description": row.description,
                 "imageUrl": row.image_url,
+                "abv": row.abv,
                 "similarity": 0.0,
             }
             for row in rows
@@ -114,8 +122,10 @@ class RecommendRepository:
             select(
                 Cocktail.id,
                 Cocktail.name,
+                Cocktail.name_en,
                 Cocktail.description,
                 Cocktail.image_url,
+                Cocktail.abv,
                 distance.label("dist"),
             )
             .where(Cocktail.embedding.isnot(None))
@@ -126,8 +136,10 @@ class RecommendRepository:
             {
                 "id": row.id,
                 "name": row.name,
+                "nameEn": row.name_en,
                 "description": row.description,
                 "imageUrl": row.image_url,
+                "abv": row.abv,
                 "similarity": round(1.0 - float(row.dist), 4),
             }
             for row in rows
