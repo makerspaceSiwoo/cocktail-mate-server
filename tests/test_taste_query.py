@@ -4,11 +4,25 @@ from types import SimpleNamespace
 
 import numpy as np
 import pytest
-from fastapi import HTTPException
+from fastapi import FastAPI, HTTPException
+from fastapi.testclient import TestClient
 from pydantic import ValidationError
+from slowapi import _rate_limit_exceeded_handler
+from slowapi.errors import RateLimitExceeded
 
+import app.recommend.router as recommend_router_module
+from app.core.database import get_db
+from app.core.rate_limit import get_proxy_client_ip, limiter
+from app.recommend.cache import (
+    TASTE_CACHE_TTL_SECONDS,
+    TasteRecommendationCache,
+)
 from app.recommend.schemas import RecommendItem, TasteRecommendRequest
-from app.recommend.router import router as recommend_router
+from app.recommend.router import (
+    FLAVOR_RECOMMEND_RATE_LIMIT,
+    recommend_by_flavor,
+    router as recommend_router,
+)
 from app.recommend.service import RecommendService
 from app.taste_query.model import get_taste_query_model
 from app.taste_query.vocabulary import (
@@ -76,6 +90,45 @@ def test_flavor_recommend_route_is_registered() -> None:
     assert "/cocktail/recommend/by-taste" not in routes
 
 
+def test_flavor_recommend_has_proxy_aware_rate_limit() -> None:
+    route_key = f"{recommend_by_flavor.__module__}.{recommend_by_flavor.__name__}"
+    limits = limiter._route_limits[route_key]
+
+    assert FLAVOR_RECOMMEND_RATE_LIMIT == "20/minute"
+    assert len(limits) == 1
+    assert str(limits[0].limit) == "20 per 1 minute"
+    assert limits[0].key_func is get_proxy_client_ip
+
+
+def test_flavor_recommend_rejects_requests_over_ip_limit(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class FakeService:
+        @staticmethod
+        def recommend_by_taste(_db, _descriptor_ids):
+            return []
+
+    monkeypatch.setattr(recommend_router_module, "service", FakeService())
+    app = FastAPI()
+    app.state.limiter = limiter
+    app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+    app.include_router(recommend_router)
+    app.dependency_overrides[get_db] = lambda: object()
+
+    with TestClient(app) as client:
+        statuses = [
+            client.post(
+                "/flavor/recommend",
+                headers={"CF-Connecting-IP": "198.51.100.73"},
+                json={"descriptorIds": [1]},
+            ).status_code
+            for _ in range(21)
+        ]
+
+    assert statuses[:20] == [200] * 20
+    assert statuses[20] == 429
+
+
 class _FakeModel:
     supported_codes = frozenset({"fruit.citrus", "mouthfeel.dry"})
 
@@ -92,8 +145,12 @@ class _FakeRepository:
         self.missing = missing
         self.same_category = same_category
         self.query = None
+        self.descriptor_queries = 0
+        self.ann_queries = 0
+        self.random_queries = 0
 
     def active_taste_descriptors_by_ids(self, _db, _ids):
+        self.descriptor_queries += 1
         values = [
             SimpleNamespace(id=1, code="fruit.citrus", category="fruit"),
             SimpleNamespace(
@@ -105,6 +162,7 @@ class _FakeRepository:
         return values[:1] if self.missing else values
 
     def nearest_for_virtual_taste(self, _db, embedding, limit):
+        self.ann_queries += 1
         self.query = embedding
         assert limit == 5
         return [
@@ -118,6 +176,7 @@ class _FakeRepository:
         ]
 
     def random_cocktails(self, _db, limit):
+        self.random_queries += 1
         assert limit == 5
         return [
             {
@@ -143,6 +202,40 @@ def test_service_encodes_taste_codes_and_runs_ann() -> None:
     assert len(repository.query) == 32
 
 
+def test_service_caches_semantically_identical_taste_requests_for_one_day() -> None:
+    repository = _FakeRepository()
+    service = RecommendService(repository, taste_model_loader=lambda: _FakeModel())
+
+    first = service.recommend_by_taste(object(), [2, 1])
+    second = service.recommend_by_taste(object(), [1, 2])
+
+    assert TASTE_CACHE_TTL_SECONDS == 86_400
+    assert first == second
+    assert first is not second
+    assert repository.descriptor_queries == 1
+    assert repository.ann_queries == 1
+
+
+def test_taste_cache_recomputes_after_ttl() -> None:
+    now = [100.0]
+    cache = TasteRecommendationCache(
+        ttl_seconds=10,
+        clock=lambda: now[0],
+    )
+    repository = _FakeRepository()
+    service = RecommendService(
+        repository,
+        taste_model_loader=lambda: _FakeModel(),
+        taste_cache=cache,
+    )
+
+    service.recommend_by_taste(object(), [1, 2])
+    now[0] += 11
+    service.recommend_by_taste(object(), [1, 2])
+
+    assert repository.ann_queries == 2
+
+
 def test_service_returns_random_cocktails_for_empty_taste_selection() -> None:
     repository = _FakeRepository()
     service = RecommendService(
@@ -150,12 +243,14 @@ def test_service_returns_random_cocktails_for_empty_taste_selection() -> None:
         taste_model_loader=lambda: pytest.fail("empty selection must not load model"),
     )
 
-    result = service.recommend_by_taste(object(), [])
+    first = service.recommend_by_taste(object(), [])
+    second = service.recommend_by_taste(object(), [])
 
-    assert len(result) == 5
-    assert all(item["similarity"] == 0.0 for item in result)
-    assert all(item["description"] for item in result)
-    assert all(item["imageUrl"] for item in result)
+    assert len(first) == len(second) == 5
+    assert all(item["similarity"] == 0.0 for item in first + second)
+    assert all(item["description"] for item in first + second)
+    assert all(item["imageUrl"] for item in first + second)
+    assert repository.random_queries == 2
 
 
 def test_service_rejects_unknown_or_same_category_descriptors() -> None:

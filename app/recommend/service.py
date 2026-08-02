@@ -9,6 +9,7 @@ from typing import Protocol
 from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
 
+from app.recommend.cache import TasteRecommendationCache
 from app.recommend.repository import RecommendRepository
 from app.taste_query.model import get_taste_query_model
 
@@ -27,9 +28,11 @@ class RecommendService:
         self,
         repository: RecommendRepository | None = None,
         taste_model_loader: Callable[[], TasteQueryEncoder] = get_taste_query_model,
+        taste_cache: TasteRecommendationCache | None = None,
     ) -> None:
         self.repository = repository or RecommendRepository()
         self.taste_model_loader = taste_model_loader
+        self.taste_cache = taste_cache or TasteRecommendationCache()
 
     def recommend(self, db: Session, cocktail_id: int) -> list[dict]:
         cocktail = self.repository.get_by_id(db, cocktail_id)
@@ -83,6 +86,17 @@ class RecommendService:
     ) -> list[dict]:
         if not descriptor_ids:
             return self.repository.random_cocktails(db, RECOMMEND_LIMIT)
+        cache_key = tuple(sorted(descriptor_ids))
+        return self.taste_cache.get_or_compute(
+            cache_key,
+            lambda: self._recommend_by_taste_uncached(db, list(cache_key)),
+        )
+
+    def _recommend_by_taste_uncached(
+        self,
+        db: Session,
+        descriptor_ids: list[int],
+    ) -> list[dict]:
         descriptors = self.repository.active_taste_descriptors_by_ids(
             db,
             descriptor_ids,
