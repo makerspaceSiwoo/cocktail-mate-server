@@ -54,6 +54,36 @@ def resolve_cookie_flags(request: Request | None) -> tuple[bool, str]:
     return True, "none"
 
 
+def resolve_cookie_domain(request: Request | None) -> str | None:
+    """쿠키 Domain 을 결정한다.
+
+    프론트(예: cocktail-mate.com)와 API(api.cocktail-mate.com)가 같은 base domain
+    (`cors_origin_domain`)을 공유하면, 쿠키를 `.{base}` 로 발급해 **양쪽 서브도메인이
+    함께** 쿠키를 받도록 한다 → 프론트 도메인에서 도는 Next.js 미들웨어(proxy)도
+    인증 쿠키를 읽을 수 있다.
+
+    - base domain 미설정(로컬 개발 등) → None(host-only, 기존 동작).
+    - Origin 이 base domain 의 apex/서브도메인 → `.{base}`.
+    - Origin 이 base domain 밖 → None(무관한 도메인에 쿠키를 공유하지 않음).
+    - Origin 없음(카카오 콜백 등 top-level 리다이렉트) → base domain 이 설정돼 있으면
+      `.{base}`. 최초 로그인 쿠키가 이 경로에서 발급되므로 공유 도메인을 적용해야 한다.
+    """
+    settings = get_settings()
+    base = settings.cors_origin_domain
+    if not base:
+        return None
+
+    origin = request.headers.get("origin") if request is not None else None
+    if origin:
+        host = urlsplit(origin).hostname
+        if host and (host == base or host.endswith(f".{base}")):
+            return f".{base}"
+        return None
+
+    # Origin 없음(콜백 top-level 리다이렉트): 공유 도메인으로 발급한다.
+    return f".{base}"
+
+
 def set_auth_cookies(
     response: Response,
     access_token: str,
@@ -62,6 +92,7 @@ def set_auth_cookies(
 ) -> None:
     settings = get_settings()
     secure, samesite = resolve_cookie_flags(request)
+    domain = resolve_cookie_domain(request)
     # 불변식 방어: SameSite=None 인데 Secure 가 아니면 브라우저가 쿠키를 거부한다.
     assert not (samesite == "none" and not secure), "SameSite=None 은 Secure 필수"
     response.set_cookie(
@@ -72,6 +103,7 @@ def set_auth_cookies(
         samesite=samesite,
         max_age=settings.access_token_expire_minutes * 60,
         path="/",
+        domain=domain,
     )
     response.set_cookie(
         REFRESH_COOKIE,
@@ -81,13 +113,22 @@ def set_auth_cookies(
         samesite=samesite,
         max_age=settings.refresh_token_expire_days * 86400,
         path=REFRESH_COOKIE_PATH,
+        domain=domain,
     )
 
 
 def clear_auth_cookies(response: Response, request: Request | None = None) -> None:
-    # 삭제 시에도 세팅 때와 동일한 flag 로 delete 해야 브라우저가 같은 쿠키로 인식해 지운다.
+    # 삭제 시에도 세팅 때와 동일한 flag/domain 으로 delete 해야 브라우저가 같은 쿠키로
+    # 인식해 지운다.
     secure, samesite = resolve_cookie_flags(request)
-    response.delete_cookie(ACCESS_COOKIE, path="/", secure=secure, samesite=samesite)
+    domain = resolve_cookie_domain(request)
     response.delete_cookie(
-        REFRESH_COOKIE, path=REFRESH_COOKIE_PATH, secure=secure, samesite=samesite
+        ACCESS_COOKIE, path="/", secure=secure, samesite=samesite, domain=domain
+    )
+    response.delete_cookie(
+        REFRESH_COOKIE,
+        path=REFRESH_COOKIE_PATH,
+        secure=secure,
+        samesite=samesite,
+        domain=domain,
     )
