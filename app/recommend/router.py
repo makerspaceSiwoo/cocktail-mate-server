@@ -16,6 +16,8 @@ router = APIRouter(tags=["recommend"])
 service = RecommendService()
 
 FLAVOR_RECOMMEND_RATE_LIMIT = "20/minute"
+# TODO: 여러 IP를 이용한 분산 요청 방어를 위해 Cloudflare edge에도
+# /flavor/recommend 전용 rate limit 규칙을 설정한다.
 
 
 @router.get("/cocktail/{id}/recommend", response_model=list[RecommendItem])
