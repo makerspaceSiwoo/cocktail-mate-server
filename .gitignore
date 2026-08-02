@@ -2,6 +2,7 @@
 __pycache__/
 *.py[codz]
 *$py.class
+.DS_Store
 
 # C extensions
 *.so
@@ -206,6 +207,30 @@ tempCodeRunnerFile.py
 
 # Ruff stuff:
 .ruff_cache/
+
+# 생성 이미지, 최종 프롬프트 CSV, API 상태/결과는 로컬 작업물이다.
+image-upload/*
+!image-upload/README.md
+!image-upload/images/
+image-upload/images/*
+!image-upload/images/.gitkeep
+!image-upload/state/
+image-upload/state/*
+!image-upload/state/.gitkeep
+!image-upload/batch/
+image-upload/batch/*
+!image-upload/batch/.gitkeep
+
+# 칵테일 맛 설명 생성 결과도 코드와 분리한다.
+taste-data/
+
+# 로컬 임베딩 모델과 학습/실험 산출물은 크기가 크고 재생성 가능하다.
+embedding-models/
+embedding-artifacts/
+
+# GNN 런타임 모델(.npz)은 배포에 필요하므로 추적하고, 재생성 가능한 학습 보고서/간선만 제외한다.
+app/taste_query/artifacts/*.edges.json
+app/taste_query/artifacts/*.metrics.json
 
 # PyPI configuration file
 .pypirc

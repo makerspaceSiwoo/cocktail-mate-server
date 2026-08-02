@@ -1,4 +1,6 @@
-.PHONY: up up-d require-env down logs rebuild shell check format format-check prod-up prod-down hooks ssh-check
+.PHONY: up up-d require-env down logs rebuild shell check format format-check prod-up prod-down hooks ssh-check image-export-prompts image-batch-prepare image-batch-status image-batch-download image-batch-wait image-upload-batch embedding-install embedding-preflight embedding-run embedding-cluster-surface embedding-apply-db taste-query-train
+
+PYTHON ?= $(shell if [ -x .venv/bin/python ]; then echo .venv/bin/python; else echo python3; fi)
 
 # 빌드 전 GitHub SSH 인증 점검 (cocktail-mate-db private 레포 설치 전제)
 ssh-check:
@@ -14,11 +16,11 @@ require-env:
 	@echo "▶ env_file: $(ENV_FILE)"
 
 # Docker 실행 (foreground)
-up: ssh-check require-env
+up: require-env
 	ENV_FILE=$(ENV_FILE) docker compose up --build
 
 # 백그라운드 실행
-up-d: ssh-check require-env
+up-d: require-env
 	ENV_FILE=$(ENV_FILE) docker compose up -d --build
 
 # 종료
@@ -35,7 +37,7 @@ shell:
 
 # 컴파일 체크
 check:
-	docker compose exec api python -m compileall app
+	docker compose exec api python -m compileall app scripts
 
 # 코드 포맷팅 (ruff — 로컬 venv/시스템 ruff 사용). 자동 정리.
 format:
@@ -57,6 +59,45 @@ prod-up:
 # 배포 종료
 prod-down:
 	docker compose -f docker-compose.prod.yml down
+
+# --- 칵테일 이미지 프롬프트·Gemini Batch·업로드 ---
+image-export-prompts:
+	$(PYTHON) -m scripts.export_cocktail_image_prompts
+
+image-batch-prepare:
+	$(PYTHON) -m scripts.generate_cocktail_images_batch prepare
+
+image-batch-status:
+	$(PYTHON) -m scripts.generate_cocktail_images_batch status
+
+image-batch-download:
+	$(PYTHON) -m scripts.generate_cocktail_images_batch download
+
+image-batch-wait:
+	$(PYTHON) -m scripts.generate_cocktail_images_batch wait-download
+
+image-upload-batch:
+	$(PYTHON) -m scripts.upload_cocktail_images
+
+# --- 로컬 맛 임베딩/축소/3D 실험(프로덕션 API 이미지와 분리) ---
+embedding-install:
+	$(PYTHON) -m pip install -r requirements-embedding.txt
+
+embedding-preflight:
+	$(PYTHON) -m scripts.build_cocktail_embeddings preflight
+
+embedding-run:
+	$(PYTHON) -m scripts.build_cocktail_embeddings run-all
+
+embedding-cluster-surface:
+	$(PYTHON) -m scripts.build_cocktail_embeddings experiment-cluster-surface
+
+# 기본은 read-only DB 검증. 실제 반영은 직접 --commit을 붙여 실행한다.
+embedding-apply-db:
+	$(PYTHON) -m scripts.build_cocktail_embeddings apply-db
+
+taste-query-train:
+	$(PYTHON) -m scripts.train_taste_query_gnn train
 
 # --- Git hooks (최초 1회 실행) ---
 # 브랜치명 검증(pre-commit) + main push 차단·ruff 포맷/린트·build 체크(pre-push) 활성화
