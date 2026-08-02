@@ -1,17 +1,20 @@
-"""Upload manually generated cocktail images in batches of at most ten."""
+"""Persist generated cocktail images directly from a trusted server process."""
 
 from __future__ import annotations
 
 import argparse
 import csv
 import json
-import mimetypes
-import os
-from contextlib import ExitStack
 from pathlib import Path
 
-import requests
 from dotenv import load_dotenv
+
+from app.image_generation.core import ImageGenerationSettings
+from app.image_upload.service import (
+    MAX_UPLOAD_BYTES,
+    IncomingImage,
+    persist_batch,
+)
 
 BATCH_SIZE = 10
 DEFAULT_CSV_PATH = Path("image-upload/cocktail-image-prompts.csv")
@@ -21,12 +24,10 @@ SUPPORTED_IMAGE_SUFFIXES = (".png", ".jpg", ".jpeg", ".webp")
 
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="Upload generated cocktail image files ten at a time."
+        description="Persist generated cocktail images to server storage and DB."
     )
     parser.add_argument("--csv", type=Path, default=DEFAULT_CSV_PATH)
     parser.add_argument("--folder", type=Path, default=DEFAULT_IMAGE_DIR)
-    parser.add_argument("--url")
-    parser.add_argument("--api-key")
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument(
         "--require-all",
@@ -86,47 +87,23 @@ def _chunks(paths: list[Path]) -> list[list[Path]]:
     ]
 
 
-def _upload_batch(
-    url: str,
-    api_key: str,
+def _persist_paths(
+    db,
+    settings: ImageGenerationSettings,
     paths: list[Path],
-) -> dict[str, object]:
-    with ExitStack() as stack:
-        files = []
-        for path in paths:
-            stream = stack.enter_context(path.open("rb"))
-            content_type = (
-                mimetypes.guess_type(path.name)[0] or "application/octet-stream"
-            )
-            files.append(("files", (path.name, stream, content_type)))
-        response = requests.post(
-            url,
-            headers={
-                "Authorization": f"Bearer {api_key}",
-                "Accept": "application/json",
-            },
-            files=files,
-            timeout=300,
-        )
-    if not response.ok:
-        raise RuntimeError(
-            f"Upload failed ({response.status_code}): {response.text[:1000]}"
-        )
-    body = response.json()
-    if not isinstance(body, dict):
-        raise RuntimeError("Upload API returned an invalid response")
-    return body
+) -> list[dict[str, object]]:
+    incoming: list[IncomingImage] = []
+    for path in paths:
+        if path.stat().st_size > MAX_UPLOAD_BYTES:
+            raise ValueError(f"{path.name}: file exceeds 15 MiB")
+        incoming.append(IncomingImage(filename=path.name, data=path.read_bytes()))
+    return persist_batch(db, incoming, settings)
 
 
 def main(argv: list[str] | None = None) -> int:
     arguments = _parser().parse_args(argv)
     env_file = _load_environment()
-    url = arguments.url or os.getenv("COCKTAIL_IMAGE_UPLOAD_URL", "")
-    api_key = arguments.api_key or os.getenv("COCKTAIL_IMAGE_UPLOAD_API_KEY", "")
-    if not url and not arguments.dry_run:
-        raise SystemExit("COCKTAIL_IMAGE_UPLOAD_URL or --url is required")
-    if not api_key and not arguments.dry_run:
-        raise SystemExit("COCKTAIL_IMAGE_UPLOAD_API_KEY or --api-key is required")
+    settings = ImageGenerationSettings()
 
     try:
         paths, missing = _load_image_paths(
@@ -149,6 +126,7 @@ def main(argv: list[str] | None = None) -> int:
                     "ready": len(paths),
                     "missing": len(missing),
                     "batches": [len(batch) for batch in batches],
+                    "output_dir": str(settings.cocktail_image_output_dir),
                 },
                 ensure_ascii=False,
                 indent=2,
@@ -156,16 +134,20 @@ def main(argv: list[str] | None = None) -> int:
         )
         return 0
 
+    from app.core.database import SessionLocal  # noqa: PLC0415
+
     uploaded = 0
     for index, batch in enumerate(batches, start=1):
-        result = _upload_batch(url, api_key, batch)
-        uploaded += int(result.get("uploaded", 0))
+        with SessionLocal() as db:
+            items = _persist_paths(db, settings, batch)
+        uploaded += len(items)
         print(
             json.dumps(
                 {
                     "batch": index,
                     "files": [path.name for path in batch],
-                    "result": result,
+                    "uploaded": len(items),
+                    "items": items,
                 },
                 ensure_ascii=False,
             )

@@ -1,1 +1,1 @@
-"""Authenticated cocktail image batch uploads."""
+"""Offline cocktail image validation and persistence helpers."""

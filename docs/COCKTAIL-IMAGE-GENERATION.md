@@ -60,9 +60,6 @@ NVIDIA_IMAGE_CROP_WIDTH=1172
 NVIDIA_IMAGE_CROP_HEIGHT=879
 NVIDIA_IMAGE_SEED=42
 NVIDIA_IMAGE_STEPS=4
-
-COCKTAIL_IMAGE_UPLOAD_API_KEY=<openssl rand -hex 32 결과>
-COCKTAIL_IMAGE_UPLOAD_URL=https://api.cocktail-mate.com/admin/cocktail-images/batch
 ```
 
 API 키는 로그나 Git에 남기지 않는다. 공통 구도 프롬프트로 카탈로그 전반의
@@ -168,9 +165,9 @@ PNG, JPEG, WebP를 받을 수 있으며 CSV 기본 파일명은 PNG다. 다른 �
 사용해도 클라이언트가 같은 `cocktail-{id}` 파일을 찾아낸다. 반드시
 `cocktail-{id}.확장자` 형식은 유지한다.
 
-## 6. 업로드 대상 미리 확인
+## 6. 반영 대상 미리 확인
 
-실제 전송 없이 현재 폴더에서 찾은 파일과 배치 크기를 확인한다.
+파일이나 DB를 변경하지 않고 현재 폴더에서 찾은 파일과 배치 크기를 확인한다.
 
 ```bash
 python3 -m scripts.upload_cocktail_images --dry-run
@@ -179,16 +176,35 @@ python3 -m scripts.upload_cocktail_images --dry-run
 CSV에 아직 생성하지 않은 이미지가 있어도 기본적으로 건너뛴다. 하나라도
 누락되면 중단하려면 `--require-all`을 추가한다.
 
-## 7. 10개씩 서버 업로드
+## 7. 서버 내부에서 이미지 반영
+
+외부 업로드 API는 제공하지 않는다. 로컬에서 생성한 CSV와 이미지 폴더를 SSH로
+운영 서버의 비공개 입력 경로에 복사한다.
+
+```bash
+rsync -av image-upload/ ubuntu@<OCI_HOST>:/srv/cocktail-mate/image-upload/
+```
+
+운영 서버에서 API 컨테이너 내부의 배치 스크립트를 실행한다. 입력 경로는 읽기
+전용으로, 최종 이미지 경로는 쓰기 가능 볼륨으로 마운트돼 있다.
+
+```bash
+cd ~/cocktail-mate-server
+sudo docker compose -f docker-compose.prod.yml exec api \
+  python -m scripts.upload_cocktail_images --require-all
+```
+
+로컬 또는 별도 내부 작업 환경에서 DB와 출력 디렉터리를 직접 설정했다면 다음
+명령도 사용할 수 있다.
 
 ```bash
 make image-upload-batch
 ```
 
-클라이언트가 CSV 순서대로 파일을 묶어
-`POST /admin/cocktail-images/batch`에 요청당 최대 10개씩 전송한다. API는 전용
-Bearer 키가 없으면 거부한다. 파일명에서 칵테일 ID를 읽고, 원본을
+스크립트가 CSV 순서대로 파일을 최대 10개씩 처리한다. 파일명에서 칵테일 ID를 읽고, 원본을
 `400x300`/`128x96` WebP로 변환해 서버 스토리지에 저장한 뒤 DB URL을 갱신한다.
+
+`/admin/cocktail-images/*`는 Caddy와 FastAPI 양쪽에서 공개하지 않는다.
 
 같은 파일을 다시 올리면 같은 콘텐츠 해시 URL이 만들어지므로 재실행해도
 안전하다. 다른 이미지를 올리면 새 해시 URL이 생기고 기존 파일은 장기 캐시

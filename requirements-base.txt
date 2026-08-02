@@ -18,5 +18,3 @@ rapidfuzz==3.14.5
 # NVIDIA gateway 의존성(requests)은 향후 재사용을 위해 유지한다.
 google-genai>=2.3.0,<3.0.0
 Pillow>=11.0.0,<13.0.0
-# FastAPI 관리자 이미지 배치 업로드(multipart/form-data)
-python-multipart>=0.0.20,<1.0.0

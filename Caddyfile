@@ -32,6 +32,13 @@ api.cocktail-mate.com {
 		file_server
 	}
 
+	# 이미지 반영은 서버 내부 배치 스크립트로만 수행한다.
+	# 과거 관리용 HTTP 경로는 애플리케이션에 전달하지 않는다.
+	@blocked_image_upload path /admin/cocktail-images /admin/cocktail-images/*
+	handle @blocked_image_upload {
+		respond 404
+	}
+
 	handle {
 		reverse_proxy api:8000
 	}

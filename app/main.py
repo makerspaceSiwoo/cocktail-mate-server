@@ -23,7 +23,6 @@ from app.core.csrf import CSRFOriginMiddleware
 from app.core.database import engine
 from app.core.rate_limit import limiter
 from app.like.router import router as like_router
-from app.image_upload.router import router as image_upload_router
 
 from slowapi import _rate_limit_exceeded_handler
 
@@ -115,7 +114,6 @@ def create_app() -> FastAPI:
     app.include_router(auth_router)
     app.include_router(my_router)
     app.include_router(like_router)
-    app.include_router(image_upload_router)
 
     @app.get("/health", tags=["infra"])
     def health():

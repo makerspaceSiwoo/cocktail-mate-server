@@ -4,21 +4,16 @@ import io
 from pathlib import Path
 
 import pytest
-from fastapi import FastAPI
-from fastapi.testclient import TestClient
 from PIL import Image
 
-import app.image_upload.router as upload_router_module
-from app.core.database import get_db
 from app.image_generation.core import ImageGenerationSettings, validate_webp
-from app.image_upload.auth import require_image_upload_key
-from app.image_upload.router import router as image_upload_router
 from app.image_upload.service import (
     ImageUploadError,
     IncomingImage,
     prepare_batch,
 )
-from scripts.upload_cocktail_images import _chunks, _load_image_paths
+from app.main import create_app
+from scripts.upload_cocktail_images import _chunks, _load_image_paths, _persist_paths
 
 
 def _png(size: tuple[int, int] = (1184, 880)) -> bytes:
@@ -129,15 +124,17 @@ def test_upload_client_finds_existing_jpeg_for_csv_png_name(
     assert missing == []
 
 
-def test_batch_api_accepts_multipart_files(monkeypatch: pytest.MonkeyPatch) -> None:
-    app = FastAPI()
-    app.include_router(image_upload_router)
-    app.dependency_overrides[require_image_upload_key] = lambda: None
-    app.dependency_overrides[get_db] = lambda: object()
-
+def test_offline_script_persists_files_without_http(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source = tmp_path / "cocktail-1.png"
+    source.write_bytes(_png())
     captured: list[IncomingImage] = []
 
     def fake_persist_batch(db, incoming, settings):
+        assert db is not None
+        assert settings.cocktail_image_output_dir == tmp_path / "media"
         captured.extend(incoming)
         return [
             {
@@ -149,14 +146,18 @@ def test_batch_api_accepts_multipart_files(monkeypatch: pytest.MonkeyPatch) -> N
             }
         ]
 
-    monkeypatch.setattr(upload_router_module, "persist_batch", fake_persist_batch)
+    monkeypatch.setattr(
+        "scripts.upload_cocktail_images.persist_batch",
+        fake_persist_batch,
+    )
 
-    with TestClient(app) as client:
-        response = client.post(
-            "/admin/cocktail-images/batch",
-            files={"files": ("cocktail-1.png", _png(), "image/png")},
-        )
+    result = _persist_paths(object(), _settings(tmp_path), [source])
 
-    assert response.status_code == 200
-    assert response.json()["uploaded"] == 1
+    assert len(result) == 1
     assert captured[0].filename == "cocktail-1.png"
+
+
+def test_admin_image_upload_route_is_not_registered() -> None:
+    routes = {route.path for route in create_app().routes}
+
+    assert "/admin/cocktail-images/batch" not in routes
