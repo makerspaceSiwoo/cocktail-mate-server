@@ -6,6 +6,8 @@
 # rate_limit: IP당 분당 100요청 초과 시 429 반환 (L7 플러딩/무차별 호출 1차 방어).
 #   caddy:2 기본 이미지엔 없는 모듈이라 caddy/Dockerfile 커스텀 빌드를 사용한다.
 #   Cloudflare 뒤라 실제 클라이언트 IP는 CF-Connecting-IP 헤더로 온다.
+#   정적 이미지(/media/*)는 rate limit에서 제외한다 — 한 화면에 이미지가 여러 개
+#   로드되면 IP당 100req/min을 쉽게 넘겨 정상 사용자에게 429가 나기 때문이다.
 
 {
 	order rate_limit before basic_auth
@@ -13,7 +15,10 @@
 
 api.cocktail-mate.com {
 	# Cloudflare 프록시 뒤 origin. 실제 클라이언트 IP는 CF-Connecting-IP 헤더로 온다.
-	rate_limit {
+	# 정적 이미지(/media/*)는 rate limit 대상에서 제외한다. 이미지는 Cache-Control
+	# immutable + Cloudflare 엣지 캐싱으로 보호되므로 횟수 제한이 필요 없다.
+	@ratelimited not path /media/*
+	rate_limit @ratelimited {
 		zone cf_per_ip {
 			key {http.request.header.CF-Connecting-IP}
 			events 100
