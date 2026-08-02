@@ -1,4 +1,4 @@
-.PHONY: up up-d require-env down logs rebuild shell check test format format-check prod-up prod-down hooks ssh-check image-preflight image-generate image-logs image-status image-export-prompts image-batch-prepare image-batch-status image-batch-download image-batch-wait image-upload-batch embedding-install embedding-preflight embedding-run embedding-cluster-surface embedding-apply-db taste-query-train
+.PHONY: up up-d require-env down logs rebuild shell check format format-check prod-up prod-down hooks ssh-check image-preflight image-generate image-logs image-status image-export-prompts image-batch-prepare image-batch-status image-batch-download image-batch-wait image-upload-batch embedding-install embedding-preflight embedding-run embedding-cluster-surface embedding-apply-db taste-query-train
 
 PYTHON ?= $(shell if [ -x .venv/bin/python ]; then echo .venv/bin/python; else echo python3; fi)
 
@@ -38,10 +38,6 @@ shell:
 # 컴파일 체크
 check:
 	docker compose exec api python -m compileall app scripts
-
-# 단위 테스트 (실제 Gemini/NVIDIA/DB 호출은 mock 처리)
-test:
-	pytest -q
 
 # 코드 포맷팅 (ruff — 로컬 venv/시스템 ruff 사용). 자동 정리.
 format:
