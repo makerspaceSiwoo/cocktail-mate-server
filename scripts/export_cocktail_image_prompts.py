@@ -13,7 +13,6 @@ from dotenv import load_dotenv
 from app.image_generation.core import ImageGenerationSettings
 from app.image_generation.errors import GenerationRequestError
 from app.image_generation.gemini import GeminiGateway
-from app.image_generation.nvidia import NvidiaImageGateway
 from app.image_generation.pipeline import CocktailImagePipeline
 
 
@@ -63,7 +62,6 @@ def main(argv: list[str] | None = None) -> int:
         settings,
         SessionLocal,
         GeminiGateway(settings),
-        NvidiaImageGateway(settings),
     )
     try:
         summary = pipeline.export_prompts(

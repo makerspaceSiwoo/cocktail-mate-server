@@ -104,21 +104,9 @@ def prepare_batch(
             raise ImageUploadError(f"{item.filename}: empty file")
         if len(item.data) > MAX_UPLOAD_BYTES:
             raise ImageUploadError(f"{item.filename}: file exceeds 15 MiB")
-        source_size = _source_size(item.data, item.filename)
-        crop_size = (
-            (
-                settings.nvidia_image_crop_width,
-                settings.nvidia_image_crop_height,
-            )
-            if source_size
-            == (settings.nvidia_image_width, settings.nvidia_image_height)
-            else None
-        )
+        _source_size(item.data, item.filename)
         try:
-            main, thumbnail, digest = create_image_variants(
-                item.data,
-                crop_size=crop_size,
-            )
+            main, thumbnail, digest = create_image_variants(item.data)
         except (OSError, ValueError) as error:
             raise ImageUploadError(f"{item.filename}: {error}") from error
         main_filename, thumbnail_filename = image_filenames(cocktail_id, digest)

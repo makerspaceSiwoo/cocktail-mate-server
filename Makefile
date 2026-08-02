@@ -1,4 +1,4 @@
-.PHONY: up up-d require-env down logs rebuild shell check format format-check prod-up prod-down hooks ssh-check image-preflight image-generate image-logs image-status image-export-prompts image-batch-prepare image-batch-status image-batch-download image-batch-wait image-upload-batch embedding-install embedding-preflight embedding-run embedding-cluster-surface embedding-apply-db taste-query-train
+.PHONY: up up-d require-env down logs rebuild shell check format format-check prod-up prod-down hooks ssh-check image-export-prompts image-batch-prepare image-batch-status image-batch-download image-batch-wait image-upload-batch embedding-install embedding-preflight embedding-run embedding-cluster-surface embedding-apply-db taste-query-train
 
 PYTHON ?= $(shell if [ -x .venv/bin/python ]; then echo .venv/bin/python; else echo python3; fi)
 
@@ -60,19 +60,7 @@ prod-up:
 prod-down:
 	docker compose -f docker-compose.prod.yml down
 
-# --- 칵테일 이미지 생성기(프로덕션 서버) ---
-image-preflight:
-	docker compose -f docker-compose.prod.yml --profile image-generation run --rm image-generator python -m scripts.generate_cocktail_images preflight
-
-image-generate:
-	docker compose -f docker-compose.prod.yml --profile image-generation up -d --force-recreate image-generator
-
-image-logs:
-	docker compose -f docker-compose.prod.yml --profile image-generation logs -f image-generator
-
-image-status:
-	docker compose -f docker-compose.prod.yml --profile image-generation run --rm image-generator python -m scripts.generate_cocktail_images status
-
+# --- 칵테일 이미지 프롬프트·Gemini Batch·업로드 ---
 image-export-prompts:
 	$(PYTHON) -m scripts.export_cocktail_image_prompts
 

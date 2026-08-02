@@ -2,9 +2,8 @@
 
 Gemini는 칵테일 이름과 레시피로 음료 내용물의 외양만 설명한다. 서버는 이
 설명에 재사용 가능한 잔·베이스 배경·공통 구도를 이어 붙여 CSV로 내보낸다.
-NVIDIA 직접 호출은 비활성화되어 있다. 완성된 CSV 프롬프트는 유료
-`gemini-3.1-flash-lite-image` Batch API에 전달하고 결과 이미지를 로컬 폴더에
-저장한다.
+완성된 CSV 프롬프트는 유료 `gemini-3.1-flash-lite-image` Batch API에 전달하고
+결과 이미지를 로컬 폴더에 저장한다.
 
 Batch API는 `4:3`, `1K` 이미지를 생성한다. 서버 업로드 API는 원본을 4:3으로
 검증·정리한 뒤 다음 두 WebP를 저장한다.
@@ -42,24 +41,11 @@ Batch API는 `4:3`, `1K` 이미지를 생성한다. 서버 업로드 API는 원�
 ## 환경변수
 
 로컬은 `.env.local`, 프로덕션 서버는 `.env`를 사용한다. CLI는 `.env.local`이
-있으면 이를 우선한다. 수동 흐름에서 NVIDIA 키는 필요하지 않으며 기존 gateway
-함수를 향후 재사용할 수 있도록 설정 예시만 남겨 둔다.
+있으면 이를 우선한다.
 
 ```dotenv
 GEMINI_API_KEY=<Google AI Studio key>
 GEMINI_TEXT_MODEL=gemini-3.5-flash-lite
-
-# 현재 호출부가 비활성화된 선택 설정
-NVIDIA_API_KEY=<NVIDIA API Catalog key>
-NVIDIA_IMAGE_MODEL=black-forest-labs/flux.2-klein-4b
-NVIDIA_IMAGE_INVOKE_URL=https://ai.api.nvidia.com/v1/genai/black-forest-labs/flux.2-klein-4b
-NVIDIA_IMAGE_CFG_SCALE=1
-NVIDIA_IMAGE_WIDTH=1184
-NVIDIA_IMAGE_HEIGHT=880
-NVIDIA_IMAGE_CROP_WIDTH=1172
-NVIDIA_IMAGE_CROP_HEIGHT=879
-NVIDIA_IMAGE_SEED=42
-NVIDIA_IMAGE_STEPS=4
 ```
 
 API 키는 로그나 Git에 남기지 않는다. 공통 구도 프롬프트로 카탈로그 전반의

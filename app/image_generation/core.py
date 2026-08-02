@@ -24,7 +24,7 @@ MAIN_IMAGE_SIZE = (400, 300)
 THUMBNAIL_IMAGE_SIZE = (128, 96)
 CONTENTS_PROMPT_VERSION = 2
 IMAGE_OUTPUT_VERSION = 4
-NVIDIA_IMAGE_PROMPT_MAX_CHARS = 800
+IMAGE_PROMPT_MAX_CHARS = 800
 
 
 def _prompt_path(filename: str) -> Path:
@@ -44,20 +44,6 @@ class ImageGenerationSettings(BaseSettings):
     gemini_text_model: str = "gemini-3.5-flash-lite"
     gemini_min_request_interval_seconds: float = 32.0
     gemini_max_transient_retries: int = 3
-    nvidia_api_key: SecretStr = SecretStr("")
-    nvidia_image_model: str = "black-forest-labs/flux.2-klein-4b"
-    nvidia_image_invoke_url: str = (
-        "https://ai.api.nvidia.com/v1/genai/black-forest-labs/flux.2-klein-4b"
-    )
-    nvidia_min_request_interval_seconds: float = 32.0
-    nvidia_max_transient_retries: int = 3
-    nvidia_image_cfg_scale: float = 1.0
-    nvidia_image_width: int = 1184
-    nvidia_image_height: int = 880
-    nvidia_image_crop_width: int = 1172
-    nvidia_image_crop_height: int = 879
-    nvidia_image_seed: int = 42
-    nvidia_image_steps: int = 4
     cocktail_image_base_url: str = "https://api.cocktail-mate.com/media/cocktails"
     cocktail_image_output_dir: Path = Path("/srv/cocktail-mate/media/cocktails")
     cocktail_image_state_dir: Path = Path("/srv/cocktail-mate/image-generation-state")
@@ -295,7 +281,7 @@ def build_final_prompt(cocktail_contents: str, parts: PromptParts) -> str:
     fixed_text = "\n".join(fixed_sections)
     drink_prefix = "Drink: "
     available_for_drink = (
-        NVIDIA_IMAGE_PROMPT_MAX_CHARS - len(drink_prefix) - len(fixed_text) - 1
+        IMAGE_PROMPT_MAX_CHARS - len(drink_prefix) - len(fixed_text) - 1
     )
     if available_for_drink < 80:
         raise ValueError("Stable image prompt fragments leave too little drink space")
@@ -304,8 +290,8 @@ def build_final_prompt(cocktail_contents: str, parts: PromptParts) -> str:
         available_for_drink,
     )
     final_prompt = f"{drink_prefix}{compact_contents}\n{fixed_text}"
-    if len(final_prompt) > NVIDIA_IMAGE_PROMPT_MAX_CHARS:
-        raise ValueError("Final NVIDIA image prompt exceeds 800 characters")
+    if len(final_prompt) > IMAGE_PROMPT_MAX_CHARS:
+        raise ValueError("Final image prompt exceeds 800 characters")
     return final_prompt
 
 
@@ -412,19 +398,6 @@ def _crop_to_ratio(
     return image.crop(box)
 
 
-def _center_crop_exact(image: Image.Image, size: tuple[int, int]) -> Image.Image:
-    crop_width, crop_height = size
-    if crop_width <= 0 or crop_height <= 0:
-        raise ValueError("Crop dimensions must be positive")
-    if crop_width > image.width or crop_height > image.height:
-        raise ValueError(
-            f"Requested crop {size} exceeds generated image size {image.size}"
-        )
-    left = (image.width - crop_width) // 2
-    top = (image.height - crop_height) // 2
-    return image.crop((left, top, left + crop_width, top + crop_height))
-
-
 def _encode_webp(image: Image.Image, *, size: tuple[int, int], quality: int) -> bytes:
     resized = image.resize(size, Image.Resampling.LANCZOS)
     sharpen_radius = 0.7 if size == MAIN_IMAGE_SIZE else 0.45
@@ -451,8 +424,6 @@ def validate_webp(data: bytes, expected_size: tuple[int, int]) -> None:
 
 def create_image_variants(
     raw_image: bytes,
-    *,
-    crop_size: tuple[int, int] | None = None,
 ) -> tuple[bytes, bytes, str]:
     """Decode one generated image and return main, thumbnail, and main SHA-256."""
 
@@ -463,11 +434,7 @@ def create_image_variants(
                 "Generated image is smaller than the required 400x300 output"
             )
         rgb_source = source.convert("RGB")
-        cropped = (
-            _center_crop_exact(rgb_source, crop_size)
-            if crop_size is not None
-            else _crop_to_ratio(rgb_source, 4, 3)
-        )
+        cropped = _crop_to_ratio(rgb_source, 4, 3)
         main = _encode_webp(cropped, size=MAIN_IMAGE_SIZE, quality=92)
         thumbnail = _encode_webp(
             cropped,

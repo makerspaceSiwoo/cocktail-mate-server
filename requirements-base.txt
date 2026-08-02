@@ -10,11 +10,9 @@ pydantic-settings
 python-jose[cryptography]
 slowapi
 httpx
-requests>=2.32.0,<3.0.0
 # 검색 자동완성 — 한글 호환 자모 분해 / 부분 문자열 유사도
 jamo==0.4.1
 rapidfuzz==3.14.5
 # 칵테일 카탈로그 이미지 배치 — Gemini 프롬프트 + 수동 업로드/WebP 파생본.
-# NVIDIA gateway 의존성(requests)은 향후 재사용을 위해 유지한다.
 google-genai>=2.3.0,<3.0.0
 Pillow>=11.0.0,<13.0.0

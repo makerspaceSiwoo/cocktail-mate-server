@@ -42,22 +42,6 @@ services:
       # 외부 HTTP 업로드 대신 서버에 복사한 배치 입력을 내부 스크립트가 읽는다.
       - /srv/cocktail-mate/image-upload:/app/image-upload:ro
 
-  # 수동 실행하는 resumable one-shot 이미지 생성기.
-  # `make image-generate` 때만 profile이 활성화되며 API 서비스와 독립적으로 종료된다.
-  image-generator:
-    image: ${API_IMAGE:-ghcr.io/makerspacesiwoo/cocktail-mate-server:latest}
-    container_name: cocktail-image-generator
-    profiles: ["image-generation"]
-    restart: "no"
-    command: ["python", "-m", "scripts.generate_cocktail_images", "run"]
-    env_file:
-      - .env
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
-    volumes:
-      - /srv/cocktail-mate/media/cocktails:/srv/cocktail-mate/media/cocktails
-      - /srv/cocktail-mate/image-generation-state:/srv/cocktail-mate/image-generation-state
-
 volumes:
   caddy_data:
   caddy_config:
