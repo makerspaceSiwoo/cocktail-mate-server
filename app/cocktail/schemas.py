@@ -78,6 +78,17 @@ class DailyRecommendResponse(BaseModel):
     items: list[DailyRecommendItem]
 
 
+class RankingItem(BaseModel):
+    id: int
+    name: str
+    imageUrl: str | None = None
+    likeCount: int
+
+
+class RankingResponse(BaseModel):
+    items: list[RankingItem]
+
+
 class AutocompleteItem(BaseModel):
     id: int
     name: str
