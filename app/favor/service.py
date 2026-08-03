@@ -9,6 +9,8 @@ from app.favor.repository import FavorRepository
 # 클러스터 하한: 코사인 유사도 0.65 이상만 (거리 0.35 이하).
 MIN_SIMILARITY = 0.65
 MAX_COSINE_DISTANCE = 1.0 - MIN_SIMILARITY
+# 추천 취향 벡터에는 가장 최근에 좋아요한 칵테일만 반영한다.
+RECENT_LIKES_LIMIT = 5
 FAVOR_LIMIT = 5
 
 
@@ -17,7 +19,11 @@ class FavorService:
         self.repository = repository or FavorRepository()
 
     def recommend(self, db: Session, user_id: int) -> list[dict]:
-        embeddings = self.repository.liked_embeddings(db, user_id)
+        embeddings = self.repository.liked_embeddings(
+            db,
+            user_id,
+            limit=RECENT_LIKES_LIMIT,
+        )
         if not embeddings:
             return []
         n = len(embeddings)
