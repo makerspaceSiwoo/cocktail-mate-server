@@ -89,11 +89,27 @@
 .venv/bin/python -m scripts.build_cocktail_embeddings train-32
 .venv/bin/python -m scripts.build_cocktail_embeddings experiment-3d
 .venv/bin/python -m scripts.build_cocktail_embeddings experiment-cluster-surface
+.venv/bin/python -m scripts.experiment_embedding_3d_top3
 ```
 
 모든 산출물에는 입력 파일 SHA-256, 모델 revision, seed, 하이퍼파라미터와 측정
 결과를 기록한다. NPZ는 `allow_pickle=False`로 다시 읽을 수 있는 숫자/문자열만
 저장하고, 학습 가중치는 safetensors로 저장한다.
+
+`experiment_embedding_3d_top3`는 기존 512D와 학습 32D를 다시 만들지 않는다.
+32D 좌표를 고정한 채 UMAP·t-SNE 3D 후보를 CPU에서 비교하고, 3D 최근접 3개가
+32D ANN 추천 5개를 하나라도 포함하는 비율로 후보를 선택한다. DB 연결이나
+쓰기 작업은 수행하지 않는다.
+
+기본 출력은 gitignore 대상인 `embedding-artifacts/top3-3d-experiment/`에
+저장된다.
+
+- `best-ball.npz/csv`: 구 내부 최고 hit 좌표
+- `best-surface.npz/csv`: t-SNE 구면 투영 후보 중 최고 hit 좌표
+- `metrics.json`: 전체 파라미터 그리드와 기존 클러스터 구면 비교 결과
+
+구면 투영은 제한된 2 자유도의 손실을 정량화하기 위한 후보이며, 자동으로 DB에
+반영되지 않는다. DB 적용 전에는 보고서의 클러스터 구면 기준선과 함께 검토한다.
 
 ## 512→32 학습 방식
 
@@ -230,5 +246,13 @@ top-10 이웃 분포와 구면 좌표의 이웃 분포가 같아지도록 직접
 ```bash
 .venv/bin/python -m scripts.build_cocktail_embeddings apply-db \
   --embedding-3d embedding-artifacts/embedding-3d-cluster-surface.npz \
+  --commit
+```
+
+top-3 실험에서 선택한 t-SNE 구면 좌표도 결과 검토 후 같은 방식으로 명시한다.
+
+```bash
+.venv/bin/python -m scripts.build_cocktail_embeddings apply-db \
+  --embedding-3d embedding-artifacts/top3-3d-experiment/best-surface.npz \
   --commit
 ```

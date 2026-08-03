@@ -9,11 +9,24 @@ from cocktail_mate_db.models import Cocktail, Like
 
 
 class FavorRepository:
-    def liked_embeddings(self, db: Session, user_id: int) -> list[list[float]]:
+    def liked_embeddings(
+        self,
+        db: Session,
+        user_id: int,
+        *,
+        limit: int,
+    ) -> list[list[float]]:
+        recent_likes = (
+            select(Like.cocktail_id.label("cocktail_id"))
+            .where(Like.user_id == user_id)
+            .order_by(Like.created_at.desc(), Like.id.desc())
+            .limit(limit)
+            .subquery()
+        )
         rows = db.execute(
             select(Cocktail.embedding)
-            .join(Like, Like.cocktail_id == Cocktail.id)
-            .where(Like.user_id == user_id, Cocktail.embedding.isnot(None))
+            .join(recent_likes, recent_likes.c.cocktail_id == Cocktail.id)
+            .where(Cocktail.embedding.isnot(None))
         ).all()
         return [[float(x) for x in row[0]] for row in rows]
 
