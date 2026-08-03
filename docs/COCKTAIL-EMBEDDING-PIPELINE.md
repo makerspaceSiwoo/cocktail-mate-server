@@ -248,3 +248,11 @@ top-10 이웃 분포와 구면 좌표의 이웃 분포가 같아지도록 직접
   --embedding-3d embedding-artifacts/embedding-3d-cluster-surface.npz \
   --commit
 ```
+
+top-3 실험에서 선택한 t-SNE 구면 좌표도 결과 검토 후 같은 방식으로 명시한다.
+
+```bash
+.venv/bin/python -m scripts.build_cocktail_embeddings apply-db \
+  --embedding-3d embedding-artifacts/top3-3d-experiment/best-surface.npz \
+  --commit
+```
