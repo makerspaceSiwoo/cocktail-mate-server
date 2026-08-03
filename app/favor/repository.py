@@ -1,4 +1,4 @@
-"""취향 추천 데이터 접근 — 좋아요 임베딩 조회 + 센트로이드 ANN."""
+"""취향 추천 데이터 접근 — 최근 좋아요 임베딩 조회 + 개별 ANN."""
 
 from __future__ import annotations
 
@@ -37,7 +37,7 @@ class FavorRepository:
     def nearest_within(
         self,
         db: Session,
-        centroid: list[float],
+        target_embedding: list[float],
         exclude_ids: set[int],
         max_distance: float,
         limit: int,
@@ -45,7 +45,7 @@ class FavorRepository:
         # HNSW 반복 스캔(pgvector 0.8+): 거리 필터 + 좋아요 제외로 후보가 걸러져도 LIMIT 만큼
         # 계속 스캔해 결과가 모자라게(under-fill) 반환되는 것을 막는다. 트랜잭션 로컬 설정.
         db.execute(text("SET LOCAL hnsw.iterative_scan = relaxed_order"))
-        dist = Cocktail.embedding.cosine_distance(centroid)
+        dist = Cocktail.embedding.cosine_distance(target_embedding)
         conditions = [Cocktail.embedding.isnot(None), dist <= max_distance]
         if exclude_ids:
             conditions.append(Cocktail.id.notin_(exclude_ids))

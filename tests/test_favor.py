@@ -3,7 +3,12 @@ from unittest.mock import Mock
 from sqlalchemy.dialects import postgresql
 
 from app.favor.repository import FavorRepository
-from app.favor.service import RECENT_LIKES_LIMIT, FavorService
+from app.favor.service import (
+    FAVOR_LIMIT,
+    MAX_COSINE_DISTANCE,
+    RECENT_LIKES_LIMIT,
+    FavorService,
+)
 
 
 def test_liked_embeddings_queries_only_the_five_most_recent_likes() -> None:
@@ -29,18 +34,36 @@ def test_liked_embeddings_queries_only_the_five_most_recent_likes() -> None:
     assert "LIMIT 5" in sql
 
 
-def test_recommend_uses_recent_like_limit_but_excludes_every_liked_cocktail() -> None:
+def test_recommend_merges_each_recent_likes_neighbors_by_best_similarity() -> None:
     db = Mock()
     repository = Mock()
-    repository.liked_embeddings.return_value = [[1.0, 0.0]]
+    embeddings = [[1.0, 0.0], [0.0, 1.0]]
+    repository.liked_embeddings.return_value = embeddings
     repository.liked_ids.return_value = {1, 2, 3, 4, 5, 6}
-    repository.nearest_within.return_value = []
+    repository.nearest_within.side_effect = [
+        [
+            {"id": 10, "name": "A", "similarity": 0.8},
+            {"id": 20, "name": "B", "similarity": 0.7},
+            {"id": 30, "name": "C", "similarity": 0.65},
+        ],
+        [
+            {"id": 20, "name": "B", "similarity": 0.9},
+            {"id": 40, "name": "D", "similarity": 0.75},
+            {"id": 50, "name": "E", "similarity": 0.63},
+            {"id": 60, "name": "F", "similarity": 0.61},
+        ],
+    ]
 
-    FavorService(repository=repository).recommend(db, user_id=123)
+    result = FavorService(repository=repository).recommend(db, user_id=123)
 
     repository.liked_embeddings.assert_called_once_with(
         db,
         123,
         limit=RECENT_LIKES_LIMIT,
     )
-    assert repository.nearest_within.call_args.args[2] == {1, 2, 3, 4, 5, 6}
+    assert repository.nearest_within.call_args_list == [
+        ((db, embeddings[0], {1, 2, 3, 4, 5, 6}, MAX_COSINE_DISTANCE, FAVOR_LIMIT),),
+        ((db, embeddings[1], {1, 2, 3, 4, 5, 6}, MAX_COSINE_DISTANCE, FAVOR_LIMIT),),
+    ]
+    assert [candidate["id"] for candidate in result] == [20, 10, 40, 30, 50]
+    assert result[0]["similarity"] == 0.9
