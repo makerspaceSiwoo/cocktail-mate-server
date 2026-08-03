@@ -1,4 +1,4 @@
-"""취향 추천 비즈니스 로직 — 좋아요 임베딩 평균 → 클러스터 범위 내 최근접."""
+"""취향 추천 비즈니스 로직 — 최근 좋아요별 ANN 후보 병합."""
 
 from __future__ import annotations
 
@@ -6,10 +6,9 @@ from sqlalchemy.orm import Session
 
 from app.favor.repository import FavorRepository
 
-# 클러스터 하한: 코사인 유사도 0.65 이상만 (거리 0.35 이하).
-MIN_SIMILARITY = 0.65
+# 코사인 유사도 0.6 이상인 후보만 추천한다 (거리 0.4 이하).
+MIN_SIMILARITY = 0.6
 MAX_COSINE_DISTANCE = 1.0 - MIN_SIMILARITY
-# 추천 취향 벡터에는 가장 최근에 좋아요한 칵테일만 반영한다.
 RECENT_LIKES_LIMIT = 5
 FAVOR_LIMIT = 5
 
@@ -26,16 +25,22 @@ class FavorService:
         )
         if not embeddings:
             return []
-        n = len(embeddings)
-        centroid = [sum(col) / n for col in zip(*embeddings)]
-        # 정반대 취향이 상쇄돼 영벡터가 되면 코사인 거리가 NaN → 정렬 불능. 방어적으로 빈 목록.
-        if not any(centroid):
-            return []
         exclude_ids = self.repository.liked_ids(db, user_id)
-        return self.repository.nearest_within(
-            db,
-            centroid,
-            exclude_ids,
-            MAX_COSINE_DISTANCE,
-            FAVOR_LIMIT,
-        )
+        candidates_by_id: dict[int, dict] = {}
+        for embedding in embeddings:
+            candidates = self.repository.nearest_within(
+                db,
+                embedding,
+                exclude_ids,
+                MAX_COSINE_DISTANCE,
+                FAVOR_LIMIT,
+            )
+            for candidate in candidates:
+                existing = candidates_by_id.get(candidate["id"])
+                if existing is None or candidate["similarity"] > existing["similarity"]:
+                    candidates_by_id[candidate["id"]] = candidate
+
+        return sorted(
+            candidates_by_id.values(),
+            key=lambda candidate: (-candidate["similarity"], candidate["id"]),
+        )[:FAVOR_LIMIT]
