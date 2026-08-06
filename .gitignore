@@ -228,6 +228,10 @@ taste-data/
 embedding-models/
 embedding-artifacts/
 
+# Vertex teacher 및 S² 그래프 실험 산출물은 로컬 전용이다.
+sensory-batch/
+sensory-graph-artifacts/
+
 # GNN 런타임 모델(.npz)은 배포에 필요하므로 추적하고, 재생성 가능한 학습 보고서/간선만 제외한다.
 app/taste_query/artifacts/*.edges.json
 app/taste_query/artifacts/*.metrics.json

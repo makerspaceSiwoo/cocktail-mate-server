@@ -1,0 +1,49 @@
+registry_version,axis_order,block_order,category,axis_id,label_ko,label_en,definition_ko,source_descriptors,merge_action,scale_id,utility_profile_id,status
+sensory-48-ae-v2,0,0,taste_chemosensory,sweetness,단맛,Sweetness,완성 음료에서 지각되는 단맛의 강도,단맛,unchanged,sensory-ae-v1,basic-taste-nonmonotonic-v1,APPROVED_LOCAL_EXPERIMENT
+sensory-48-ae-v2,1,0,taste_chemosensory,saltiness,짠맛,Saltiness,완성 음료에서 지각되는 염미의 강도,짠맛,unchanged,sensory-ae-v1,basic-taste-nonmonotonic-v1,APPROVED_LOCAL_EXPERIMENT
+sensory-48-ae-v2,2,0,taste_chemosensory,sourness,신맛,Sourness,완성 음료에서 지각되는 산미의 강도,신맛,unchanged,sensory-ae-v1,basic-taste-nonmonotonic-v1,APPROVED_LOCAL_EXPERIMENT
+sensory-48-ae-v2,3,0,taste_chemosensory,bitterness,쓴맛,Bitterness,완성 음료에서 지각되는 쓴맛의 강도,쓴맛,unchanged,sensory-ae-v1,basic-taste-nonmonotonic-v1,APPROVED_LOCAL_EXPERIMENT
+sensory-48-ae-v2,4,0,taste_chemosensory,umami,감칠맛,Umami,완성 음료에서 지각되는 감칠맛의 강도,감칠맛,unchanged,sensory-ae-v1,basic-taste-nonmonotonic-v1,APPROVED_LOCAL_EXPERIMENT
+sensory-48-ae-v2,5,0,taste_chemosensory,pungency,매운 자극감,Pungency,향신료와 생강 등에 의한 화학적 자극의 강도,매운맛,unchanged,sensory-ae-v1,association-monotonic-v1,APPROVED_LOCAL_EXPERIMENT
+sensory-48-ae-v2,6,0,taste_chemosensory,astringency,떫고 드라이한 수렴감,Astringency,입안을 조이고 건조하게 만드는 수렴 감각의 강도,떫은맛|드라이하고 수렴감,merged_2_to_1,sensory-ae-v1,association-monotonic-v1,APPROVED_LOCAL_EXPERIMENT
+sensory-48-ae-v2,7,0,taste_chemosensory,fattiness,지방감,Fattiness,지방 또는 오일에서 오는 지방 감각의 강도,지방맛(고소함),unchanged_sense_narrowed_to_fattiness,sensory-ae-v1,association-monotonic-v1,APPROVED_LOCAL_EXPERIMENT
+sensory-48-ae-v2,8,1,fruit,citrus_fruit,시트러스 과일향,Citrus fruit,시트러스류 과일 특성의 강도,시트러스류,unchanged,sensory-ae-v1,association-monotonic-v1,APPROVED_LOCAL_EXPERIMENT
+sensory-48-ae-v2,9,1,fruit,berry_fruit,베리 과일향,Berry fruit,베리류 과일 특성의 강도,베리류,unchanged,sensory-ae-v1,association-monotonic-v1,APPROVED_LOCAL_EXPERIMENT
+sensory-48-ae-v2,10,1,fruit,stone_fruit,핵과류 과일향,Stone fruit,복숭아와 체리 등 핵과류 특성의 강도,핵과류,unchanged,sensory-ae-v1,association-monotonic-v1,APPROVED_LOCAL_EXPERIMENT
+sensory-48-ae-v2,11,1,fruit,pome_fruit,사과 배 과일향,Pome fruit,사과와 배류 과일 특성의 강도,사과·배류,unchanged,sensory-ae-v1,association-monotonic-v1,APPROVED_LOCAL_EXPERIMENT
+sensory-48-ae-v2,12,1,fruit,tropical_fruit,열대 과일향,Tropical fruit,파인애플과 망고 등 열대과일 특성의 강도,열대과일류,unchanged,sensory-ae-v1,association-monotonic-v1,APPROVED_LOCAL_EXPERIMENT
+sensory-48-ae-v2,13,1,fruit,melon_fruit,멜론 과일향,Melon fruit,멜론류 과일 특성의 강도,멜론류,unchanged,sensory-ae-v1,association-monotonic-v1,APPROVED_LOCAL_EXPERIMENT
+sensory-48-ae-v2,14,1,fruit,grape_dried_fruit,포도 건과일향,Grape and dried fruit,포도와 건과일류 특성의 강도,포도·건과일류,unchanged,sensory-ae-v1,association-monotonic-v1,APPROVED_LOCAL_EXPERIMENT
+sensory-48-ae-v2,15,1,aroma,herb_botanical_aroma,허브 보태니컬 향,Herb and botanical aroma,허브와 보태니컬 향의 강도,허브·보태니컬,unchanged,sensory-ae-v1,association-monotonic-v1,APPROVED_LOCAL_EXPERIMENT
+sensory-48-ae-v2,16,1,aroma,spice_aroma,향신료 향,Spice aroma,후각으로 지각되는 향신료 특성의 강도,향신료,unchanged,sensory-ae-v1,association-monotonic-v1,APPROVED_LOCAL_EXPERIMENT
+sensory-48-ae-v2,17,1,aroma,floral_aroma,꽃향,Floral aroma,꽃과 같은 향의 강도,꽃향,unchanged,sensory-ae-v1,association-monotonic-v1,APPROVED_LOCAL_EXPERIMENT
+sensory-48-ae-v2,18,1,aroma,vanilla_caramel_aroma,바닐라 캐러멜 향,Vanilla and caramel aroma,바닐라와 캐러멜 계열 향의 강도,바닐라·캐러멜,unchanged,sensory-ae-v1,association-monotonic-v1,APPROVED_LOCAL_EXPERIMENT
+sensory-48-ae-v2,19,1,aroma,nutty_aroma,견과 향,Nutty aroma,견과류와 같은 향의 강도,견과류,unchanged,sensory-ae-v1,association-monotonic-v1,APPROVED_LOCAL_EXPERIMENT
+sensory-48-ae-v2,20,1,aroma,coffee_chocolate_aroma,커피 초콜릿 향,Coffee and chocolate aroma,커피와 초콜릿 계열 향의 강도,커피·초콜릿,unchanged,sensory-ae-v1,association-monotonic-v1,APPROVED_LOCAL_EXPERIMENT
+sensory-48-ae-v2,21,1,aroma,oak_smoky_aroma,오크 스모키 향,Oak and smoky aroma,오크 숙성과 연기 계열 향의 강도,오크·스모키,unchanged,sensory-ae-v1,association-monotonic-v1,APPROVED_LOCAL_EXPERIMENT
+sensory-48-ae-v2,22,1,aroma,mineral_briny_aroma,미네랄 짭짤한 향,Mineral and briny aroma,미네랄과 염수 같은 후각 특성의 강도,미네랄·짭짤함,unchanged_modality_distinct_from_saltiness,sensory-ae-v1,association-monotonic-v1,APPROVED_LOCAL_EXPERIMENT
+sensory-48-ae-v2,23,1,aroma,cream_dairy_aroma,크림 유제품 향,Cream and dairy aroma,크림과 유제품 계열 향의 강도,크림·유제품,unchanged,sensory-ae-v1,association-monotonic-v1,APPROVED_LOCAL_EXPERIMENT
+sensory-48-ae-v2,24,1,aroma,malt_grain_aroma,몰트 곡물 향,Malt and grain aroma,몰트와 곡물 계열 향의 강도,몰트·곡물,unchanged,sensory-ae-v1,association-monotonic-v1,APPROVED_LOCAL_EXPERIMENT
+sensory-48-ae-v2,25,2,mouthfeel,refreshing_crisp_mouthfeel,청량하고 산뜻한 감각,Refreshing and crisp mouthfeel,입안에서 느껴지는 청량하고 산뜻한 인상의 강도,청량하고 산뜻함,unchanged,sensory-ae-v1,association-monotonic-v1,APPROVED_LOCAL_EXPERIMENT
+sensory-48-ae-v2,26,2,mouthfeel,smooth_silky_mouthfeel,매끄럽고 실키한 감각,Smooth and silky mouthfeel,매끄럽고 실키한 촉감의 강도,매끄럽고 실키함,unchanged,sensory-ae-v1,association-monotonic-v1,APPROVED_LOCAL_EXPERIMENT
+sensory-48-ae-v2,27,2,mouthfeel,creamy_velvety_mouthfeel,크리미하고 벨벳 같은 감각,Creamy and velvety mouthfeel,크리미하고 벨벳 같은 촉감의 강도,크리미하고 벨벳감,unchanged,sensory-ae-v1,association-monotonic-v1,APPROVED_LOCAL_EXPERIMENT
+sensory-48-ae-v2,28,2,mouthfeel,juicy_mouthfeel,과즙감,Juicy mouthfeel,과즙이 풍부하게 느껴지는 감각의 강도,과즙감,unchanged,sensory-ae-v1,association-monotonic-v1,APPROVED_LOCAL_EXPERIMENT
+sensory-48-ae-v2,29,2,mouthfeel,carbonation_tingle,탄산의 톡 쏘는 감각,Carbonation tingle,탄산에서 오는 톡 쏘는 촉감의 강도,톡 쏘는 탄산감,unchanged,sensory-ae-v1,association-monotonic-v1,APPROVED_LOCAL_EXPERIMENT
+sensory-48-ae-v2,30,3,finish,clean_finish,깔끔한 여운,Clean finish,마신 뒤 깔끔하게 정리되는 여운의 강도,깔끔한 여운,unchanged,sensory-ae-v1,association-monotonic-v1,APPROVED_LOCAL_EXPERIMENT
+sensory-48-ae-v2,31,3,finish,dry_finish,드라이한 여운,Dry finish,마신 뒤 드라이하게 남는 여운의 강도,드라이한 여운,unchanged_phase_distinct_from_astringency,sensory-ae-v1,association-monotonic-v1,APPROVED_LOCAL_EXPERIMENT
+sensory-48-ae-v2,32,3,finish,sweet_finish,달콤한 여운,Sweet finish,마신 뒤 달콤하게 남는 여운의 강도,달콤한 여운,unchanged,sensory-ae-v1,association-monotonic-v1,APPROVED_LOCAL_EXPERIMENT
+sensory-48-ae-v2,33,3,finish,sour_finish,새콤한 여운,Sour finish,마신 뒤 새콤하게 남는 여운의 강도,새콤한 여운,unchanged,sensory-ae-v1,association-monotonic-v1,APPROVED_LOCAL_EXPERIMENT
+sensory-48-ae-v2,34,3,finish,bitter_finish,쌉쌀한 여운,Bitter finish,마신 뒤 쌉쌀하게 남는 여운의 강도,쌉쌀한 여운,unchanged,sensory-ae-v1,association-monotonic-v1,APPROVED_LOCAL_EXPERIMENT
+sensory-48-ae-v2,35,3,finish,fruity_finish,과일향 여운,Fruity finish,마신 뒤 과일향이 남는 여운의 강도,과일향 여운,unchanged,sensory-ae-v1,association-monotonic-v1,APPROVED_LOCAL_EXPERIMENT
+sensory-48-ae-v2,36,3,finish,herb_spice_finish,허브 향신료 여운,Herb and spice finish,마신 뒤 허브와 향신료 특성이 남는 강도,허브·향신료 여운,unchanged,sensory-ae-v1,association-monotonic-v1,APPROVED_LOCAL_EXPERIMENT
+sensory-48-ae-v2,37,3,finish,creamy_nutty_finish,크리미하고 고소한 여운,Creamy and nutty finish,마신 뒤 크리미하고 고소한 특성이 남는 강도,크리미·고소한 여운,unchanged,sensory-ae-v1,association-monotonic-v1,APPROVED_LOCAL_EXPERIMENT
+sensory-48-ae-v2,38,3,finish,finish_length,여운의 길이,Finish length,여운이 길게 지속되는 정도,길게 이어지는 여운,unchanged,sensory-ae-v1,association-monotonic-v1,APPROVED_LOCAL_EXPERIMENT
+sensory-48-ae-v2,39,2,body,light_body,가벼운 바디,Light body,가벼운 바디 특성의 강도,가벼운 바디,unchanged,sensory-ae-v1,association-monotonic-v1,APPROVED_LOCAL_EXPERIMENT
+sensory-48-ae-v2,40,2,body,rich_body,리치한 바디,Rich body,리치한 바디 특성의 강도,리치한 바디,unchanged,sensory-ae-v1,association-monotonic-v1,APPROVED_LOCAL_EXPERIMENT
+sensory-48-ae-v2,41,2,body,heavy_body,묵직한 바디,Heavy body,묵직한 바디 특성의 강도,묵직한 바디,unchanged,sensory-ae-v1,association-monotonic-v1,APPROVED_LOCAL_EXPERIMENT
+sensory-48-ae-v2,42,2,body,dense_body,밀도감 있는 바디,Dense body,밀도감 있는 바디 특성의 강도,밀도감 있는 바디,unchanged,sensory-ae-v1,association-monotonic-v1,APPROVED_LOCAL_EXPERIMENT
+sensory-48-ae-v2,43,4,temperature,coldness,차가움,Coldness,완성 음료가 차갑고 시원하게 지각되는 강도,매우 차가움|차가움|시원함,collapsed_3_to_1,sensory-ae-v1,association-monotonic-v1,APPROVED_LOCAL_EXPERIMENT
+sensory-48-ae-v2,44,4,alcohol,alcohol_smoothness,부드러운 알코올감,Alcohol smoothness,알코올이 거칠지 않고 부드럽게 느껴지는 특성의 강도,부드러운 알코올감,unchanged,sensory-ae-v1,association-monotonic-v1,APPROVED_LOCAL_EXPERIMENT
+sensory-48-ae-v2,45,4,alcohol,clean_spirit_character,깨끗한 스피릿감,Clean spirit character,잡미 없이 깨끗하게 드러나는 스피릿 특성의 강도,깨끗한 스피릿감,unchanged,sensory-ae-v1,association-monotonic-v1,APPROVED_LOCAL_EXPERIMENT
+sensory-48-ae-v2,46,4,alcohol,alcohol_heat,따뜻한 알코올 열감,Alcohol heat,알코올에서 오는 따뜻한 열감의 강도,따뜻한 알코올 열감,unchanged,sensory-ae-v1,association-monotonic-v1,APPROVED_LOCAL_EXPERIMENT
+sensory-48-ae-v2,47,4,alcohol,alcohol_intensity,강렬한 알코올감,Alcohol intensity,알코올 존재감이 강렬하게 느껴지는 정도,강렬한 알코올감,unchanged,sensory-ae-v1,association-monotonic-v1,APPROVED_LOCAL_EXPERIMENT
