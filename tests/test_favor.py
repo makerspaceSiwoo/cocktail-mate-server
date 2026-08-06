@@ -5,6 +5,7 @@ from sqlalchemy.dialects import postgresql
 from app.favor.repository import FavorRepository
 from app.favor.service import (
     FAVOR_LIMIT,
+    MAX_COSINE_DISTANCE,
     RECENT_LIKES_LIMIT,
     FavorService,
 )
@@ -61,8 +62,8 @@ def test_recommend_merges_each_recent_likes_neighbors_by_best_similarity() -> No
         limit=RECENT_LIKES_LIMIT,
     )
     assert repository.nearest_within.call_args_list == [
-        ((db, embeddings[0], {1, 2, 3, 4, 5, 6}, FAVOR_LIMIT),),
-        ((db, embeddings[1], {1, 2, 3, 4, 5, 6}, FAVOR_LIMIT),),
+        ((db, embeddings[0], {1, 2, 3, 4, 5, 6}, MAX_COSINE_DISTANCE, FAVOR_LIMIT),),
+        ((db, embeddings[1], {1, 2, 3, 4, 5, 6}, MAX_COSINE_DISTANCE, FAVOR_LIMIT),),
     ]
     assert [candidate["id"] for candidate in result] == [20, 10, 40, 30, 50]
     assert result[0]["similarity"] == 0.9
