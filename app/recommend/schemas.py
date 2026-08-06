@@ -2,6 +2,12 @@
 
 from pydantic import BaseModel, Field, field_validator
 
+from app.sensory_embedding import SENSORY_V2_REGISTRY
+
+# 48축 감각 레지스트리의 카테고리 수. taste_descriptors.category 와 1:1 대응한다.
+# 하드코딩하지 않는 이유: 축이 늘거나 카테고리가 쪼개지면 상한이 같이 따라와야 한다.
+TASTE_CATEGORY_COUNT = len(SENSORY_V2_REGISTRY.category_counts)
+
 
 class RecommendItem(BaseModel):
     id: int
@@ -26,7 +32,10 @@ class TasteDescriptorCatalogResponse(BaseModel):
 
 
 class TasteRecommendRequest(BaseModel):
-    descriptorIds: list[int] = Field(max_length=7)
+    # 상한은 감각 축 카테고리 수와 같다. 서비스가 카테고리당 1개만 허용하므로
+    # 이 값보다 작으면 "카테고리마다 하나씩" 고른 정상 요청이 422로 거부된다.
+    # 48축 전환으로 taste_chemosensory 가 추가되며 7 -> 8 이 되었다.
+    descriptorIds: list[int] = Field(max_length=TASTE_CATEGORY_COUNT)
 
     @field_validator("descriptorIds")
     @classmethod
