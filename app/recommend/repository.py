@@ -1,4 +1,4 @@
-"""추천 데이터 접근 — 임베딩 코사인 ANN 조회."""
+"""추천 데이터 접근 — Graph48 코사인 ANN + Preference48 내적(MIPS) 조회."""
 
 from __future__ import annotations
 
@@ -20,13 +20,13 @@ class RecommendRepository:
         db: Session,
         target_embedding,
         exclude_id: int,
-        max_distance: float,
         limit: int,
     ) -> list[dict]:
-        # HNSW 반복 스캔(pgvector 0.8+): 거리 필터로 후보가 걸러져도 LIMIT 만큼 계속 스캔해
-        # 결과가 모자라게(under-fill) 반환되는 것을 막는다. 트랜잭션 로컬 설정.
+        # HNSW 반복 스캔(pgvector 0.8+): 자기 자신 제외로 후보가 걸러져도 LIMIT 만큼 계속
+        # 스캔해 결과가 모자라게(under-fill) 반환되는 것을 막는다. 트랜잭션 로컬 설정.
         db.execute(text("SET LOCAL hnsw.iterative_scan = relaxed_order"))
-        # 코사인 거리식을 SELECT/WHERE/ORDER BY 에서 재사용 (거리 <= 임계치 → 클러스터 이탈 방지).
+        # Graph48 코사인 거리(`<=>`, idx_cocktails_embedding_hnsw / vector_cosine_ops).
+        # 절대 거리 임계값은 없다 — 이유는 app/recommend/service.py 모듈 docstring 참고.
         dist = Cocktail.embedding.cosine_distance(target_embedding)
         rows = db.execute(
             select(
@@ -41,7 +41,6 @@ class RecommendRepository:
             .where(
                 Cocktail.embedding.isnot(None),
                 Cocktail.id != exclude_id,
-                dist <= max_distance,
             )
             .order_by(dist)
             .limit(limit)
@@ -110,14 +109,21 @@ class RecommendRepository:
             ).all()
         )
 
-    def nearest_for_virtual_taste(
+    def nearest_by_preference(
         self,
         db: Session,
-        target_embedding,
+        query_vector,
         limit: int,
     ) -> list[dict]:
+        """Rank cocktails by maximum inner product against a Preference48 query.
+
+        `preference_embedding`은 정규화하지 않은 [0,1] 벡터라 코사인이 아니라 **내적**으로
+        비교한다(`idx_cocktails_preference_embedding_hnsw` / `vector_ip_ops`).
+        pgvector의 `<#>`(`max_inner_product`)는 **음의 내적**을 돌려주므로
+        오름차순 정렬이 곧 내적 내림차순이고, `similarity = -distance`다.
+        """
         db.execute(text("SET LOCAL hnsw.iterative_scan = relaxed_order"))
-        distance = Cocktail.embedding.cosine_distance(target_embedding)
+        distance = Cocktail.preference_embedding.max_inner_product(query_vector)
         rows = db.execute(
             select(
                 Cocktail.id,
@@ -128,7 +134,7 @@ class RecommendRepository:
                 Cocktail.abv,
                 distance.label("dist"),
             )
-            .where(Cocktail.embedding.isnot(None))
+            .where(Cocktail.preference_embedding.isnot(None))
             .order_by(distance)
             .limit(limit)
         ).all()
@@ -140,7 +146,7 @@ class RecommendRepository:
                 "description": row.description,
                 "imageUrl": row.image_url,
                 "abv": row.abv,
-                "similarity": round(1.0 - float(row.dist), 4),
+                "similarity": round(-float(row.dist), 4),
             }
             for row in rows
         ]

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from collections import OrderedDict
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -9,9 +10,22 @@ from threading import Lock, RLock
 from time import monotonic
 
 Recommendation = list[dict[str, object]]
-CacheKey = tuple[int, ...]
+CacheKey = tuple[int | str, ...]
 TASTE_CACHE_TTL_SECONDS = 24 * 60 * 60
 TASTE_CACHE_MAX_ENTRIES = 4096
+
+# 캐시 무효화 epoch. 캐시 키는 descriptor id 조합인데, 임베딩을 다시 적재하면 **같은
+# 조합이 다른 결과를 뜻하게 된다**. TTL이 24시간이라 epoch를 올리지 않으면 낡은 결과가
+# 하루 동안 계속 나간다.
+#
+# 규칙: `cocktails.embedding` / `preference_embedding`을 새로 적재할 때마다
+# 아래 기본값을 그 적재 run id로 바꾸거나, 배포 환경에 `FLAVOR_CACHE_EPOCH`를 주입한다.
+# (프로세스 로컬 캐시라 재시작만으로도 비워지지만, 롤링 배포/재적재-무재시작 상황에서는
+#  epoch만이 유일한 방어선이다.)
+DEFAULT_FLAVOR_CACHE_EPOCH = "run-20260806-full602-v1"
+FLAVOR_CACHE_EPOCH = (
+    os.getenv("FLAVOR_CACHE_EPOCH", "").strip() or DEFAULT_FLAVOR_CACHE_EPOCH
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -40,6 +54,12 @@ class TasteRecommendationCache:
         self._entries: OrderedDict[CacheKey, _CacheEntry] = OrderedDict()
         self._key_locks: dict[CacheKey, Lock] = {}
         self._lock = RLock()
+
+    def clear(self) -> None:
+        """Drop every cached recommendation (deploy/reload invalidation hook)."""
+
+        with self._lock:
+            self._entries.clear()
 
     @staticmethod
     def _copy(value: tuple[dict[str, object], ...]) -> Recommendation:

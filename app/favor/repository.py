@@ -39,14 +39,14 @@ class FavorRepository:
         db: Session,
         target_embedding: list[float],
         exclude_ids: set[int],
-        max_distance: float,
         limit: int,
     ) -> list[dict]:
-        # HNSW 반복 스캔(pgvector 0.8+): 거리 필터 + 좋아요 제외로 후보가 걸러져도 LIMIT 만큼
+        # HNSW 반복 스캔(pgvector 0.8+): 좋아요 제외 필터로 후보가 걸러져도 LIMIT 만큼
         # 계속 스캔해 결과가 모자라게(under-fill) 반환되는 것을 막는다. 트랜잭션 로컬 설정.
         db.execute(text("SET LOCAL hnsw.iterative_scan = relaxed_order"))
+        # Graph48 코사인 거리(`<=>`). 절대 거리 임계값은 없다 — 모듈 docstring 참고.
         dist = Cocktail.embedding.cosine_distance(target_embedding)
-        conditions = [Cocktail.embedding.isnot(None), dist <= max_distance]
+        conditions = [Cocktail.embedding.isnot(None)]
         if exclude_ids:
             conditions.append(Cocktail.id.notin_(exclude_ids))
         rows = db.execute(
