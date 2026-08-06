@@ -398,6 +398,15 @@ class GoogleStorageGateway:
         permissions: Sequence[str],
     ) -> str:
         requested = tuple(sorted(set(permissions)))
+        # storage.buckets.list is a project-scoped permission. The successful
+        # bucket-list request above is its authorization check; including it in
+        # a bucket resource's iam/testPermissions call makes the Storage API
+        # reject the entire request with HTTP 400.
+        bucket_permissions = tuple(
+            permission
+            for permission in requested
+            if permission != "storage.buckets.list"
+        )
         response = self._request(
             "get",
             f"{STORAGE_API}/b",
@@ -445,7 +454,10 @@ class GoogleStorageGateway:
             f"{STORAGE_API}/b/{quote(bucket, safe='')}/iam/testPermissions",
             phase="gcs_permission_preflight",
             params=[
-                *[("permissions", permission) for permission in requested],
+                *[
+                    ("permissions", permission)
+                    for permission in bucket_permissions
+                ],
                 ("userProject", project),
             ],
         )
@@ -458,7 +470,7 @@ class GoogleStorageGateway:
                 "GCS permission preflight returned invalid metadata",
                 phase="gcs_permission_preflight",
             )
-        if set(granted) != set(requested):
+        if set(granted) != set(bucket_permissions):
             raise VertexLiveError(
                 "required existing-bucket GCS permissions are missing",
                 phase="gcs_permission_preflight",

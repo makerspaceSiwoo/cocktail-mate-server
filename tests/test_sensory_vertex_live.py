@@ -1195,6 +1195,15 @@ def test_concrete_storage_upload_uses_generation_zero_precondition(
     permission_url, permission_test = session.get_calls[1]
     assert permission_url.endswith("/iam/testPermissions")
     assert ("userProject", DEFAULT_PROJECT) in permission_test["params"]
+    assert (
+        "permissions",
+        "storage.buckets.list",
+    ) not in permission_test["params"]
+    assert {
+        value
+        for key, value in permission_test["params"]
+        if key == "permissions"
+    } == set(REQUIRED_GCS_PERMISSIONS) - {"storage.buckets.list"}
     assert "cloudresourcemanager" not in " ".join(
         url for url, _ in session.get_calls + session.post_calls
     )
