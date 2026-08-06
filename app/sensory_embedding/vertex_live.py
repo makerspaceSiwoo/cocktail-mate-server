@@ -98,6 +98,9 @@ LIVE_PILOT_APPROVAL_MARKER = "USER_APPROVED_VERTEX_LIVE_PILOT_10X48_V1"
 LIVE_PILOT_APPROVAL_MARKER_SHA256 = (
     "e595acef7f3dba3f0ea87812cbab7f78e555bbafa69fad171a83a8270ff96297"
 )
+LIVE_PILOT_APPROVED_MANIFEST_SHA256 = (
+    "06f7a1398537812bf5e31daecba9be7dfaa495ad54149003b6008034d059f396"
+)
 _CLOUD_PLATFORM_SCOPE = "https://www.googleapis.com/auth/cloud-platform"
 REQUIRED_GCS_PERMISSIONS = frozenset(
     {
@@ -1377,6 +1380,10 @@ def submit_shard_once(
             if _run_scope == FULL_RUN_SCOPE:
                 _validate_live_manifest(manifest)
             elif _run_scope == PILOT_RUN_SCOPE:
+                if manifest_sha != LIVE_PILOT_APPROVED_MANIFEST_SHA256:
+                    raise VertexSensoryBatchError(
+                        "live pilot manifest SHA-256 is not the approved prep-v2 digest"
+                    )
                 _validate_live_pilot_manifest(
                     manifest,
                     user_approval_marker=_user_approval_marker,

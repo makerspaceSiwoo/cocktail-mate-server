@@ -9,6 +9,7 @@ from typing import Any
 
 import pytest
 
+from app.sensory_embedding import vertex_live
 from app.sensory_embedding.registry import SENSORY_V2_REGISTRY
 from app.sensory_embedding.vertex_batch import (
     AXIS_REGISTRY_FILE_SHA256,
@@ -33,6 +34,7 @@ from app.sensory_embedding.vertex_live import (
     LIVE_ID_ALLOWLIST_SHA256,
     LIVE_PILOT_APPROVAL_MARKER,
     LIVE_PILOT_APPROVAL_MARKER_SHA256,
+    LIVE_PILOT_APPROVED_MANIFEST_SHA256,
     LIVE_PILOT_FROZEN_SOURCE_SHA256,
     LIVE_PILOT_MANIFEST_TYPE,
     LIVE_PILOT_REQUEST_COUNT,
@@ -210,7 +212,10 @@ def _manifest_fixture(
     return path, manifest
 
 
-def _pilot_manifest_fixture(tmp_path: Path) -> tuple[Path, dict[str, Any]]:
+def _pilot_manifest_fixture(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> tuple[Path, dict[str, Any]]:
     requests = [
         {
             "key": f"r{row_index:04d}-a{axis.axis_order:02d}",
@@ -307,6 +312,11 @@ def _pilot_manifest_fixture(tmp_path: Path) -> tuple[Path, dict[str, Any]]:
     }
     path = tmp_path / "pilot-manifest.json"
     path.write_text(json.dumps(manifest, sort_keys=True), encoding="utf-8")
+    monkeypatch.setattr(
+        vertex_live,
+        "LIVE_PILOT_APPROVED_MANIFEST_SHA256",
+        hashlib.sha256(path.read_bytes()).hexdigest(),
+    )
     return path, manifest
 
 
@@ -466,8 +476,9 @@ def test_live_flag_and_offline_pilot_gate_block_before_adc_or_network(
 
 def test_live_pilot_scope_requires_marker_and_never_enters_full_create(
     tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    pilot_path, _ = _pilot_manifest_fixture(tmp_path)
+    pilot_path, _ = _pilot_manifest_fixture(tmp_path, monkeypatch)
     ledger_path = tmp_path / "pilot-ledger.json"
     adc_calls = 0
 
@@ -514,8 +525,9 @@ def test_live_pilot_scope_requires_marker_and_never_enters_full_create(
 
 def test_live_pilot_creates_only_one_60_record_shard_attempt(
     tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    pilot_path, _ = _pilot_manifest_fixture(tmp_path)
+    pilot_path, _ = _pilot_manifest_fixture(tmp_path, monkeypatch)
     ledger_path = tmp_path / "pilot-ledger.json"
     storage = FakeStorage()
     batch = FakeBatch()
@@ -544,10 +556,11 @@ def test_live_pilot_creates_only_one_60_record_shard_attempt(
     )
 
 
-def test_shard_content_cannot_be_rebound_by_updating_only_shard_hash(
+def test_pilot_content_cannot_be_rebound_with_all_self_consistent_hashes(
     tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    pilot_path, manifest = _pilot_manifest_fixture(tmp_path)
+    pilot_path, manifest = _pilot_manifest_fixture(tmp_path, monkeypatch)
     shard_path = tmp_path / "requests-00.jsonl"
     lines = shard_path.read_text(encoding="utf-8").splitlines()
     first = json.loads(lines[0])
@@ -556,6 +569,12 @@ def test_shard_content_cannot_be_rebound_by_updating_only_shard_hash(
     payload = ("\n".join(lines) + "\n").encode()
     shard_path.write_bytes(payload)
     manifest["shards"][0]["sha256"] = hashlib.sha256(payload).hexdigest()
+    first_request = next(
+        request
+        for request in manifest["requests"]
+        if request["row_index"] == 0 and request["axis_order"] == 0
+    )
+    first_request["prompt_sha256"] = hashlib.sha256(b"tampered prompt").hexdigest()
     pilot_path.write_text(json.dumps(manifest), encoding="utf-8")
     adc_calls = 0
 
@@ -574,8 +593,14 @@ def test_shard_content_cannot_be_rebound_by_updating_only_shard_hash(
             credential_loader=forbidden_adc,
         )
 
-    assert captured.value.phase == "shard_validation"
+    assert captured.value.phase == "offline_gate"
     assert adc_calls == 0
+
+
+def test_reviewed_prep_v2_manifest_digest_is_exactly_pinned() -> None:
+    assert LIVE_PILOT_APPROVED_MANIFEST_SHA256 == (
+        "06f7a1398537812bf5e31daecba9be7dfaa495ad54149003b6008034d059f396"
+    )
 
 
 def test_one_measured_request_cannot_unlock_full_production(
