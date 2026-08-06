@@ -25,19 +25,24 @@ import csv
 import hashlib
 import json
 import math
+import platform
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable, Sequence
 
 import numpy as np
+import scipy
 from scipy.optimize import minimize
+from scipy.special import erfc
 
 DEFAULT_ARTIFACT_DIR = Path("/private/tmp/cocktail-mate-sensory-artifacts-602-v1")
 DEFAULT_OUTPUT_DIR = Path("/private/tmp/cocktail-mate-s2-rankscaled-602-v1")
 DEFAULT_SEED = 20260806
 TOP_K = 5
 BOTTOM_DECILE_FRACTION = 0.10
+LAYOUT_ALGORITHM = "rank_rescaled_spherical_nca_v1"
+LAYOUT_RUN_ID = "s2-rankscaled-602-v1"
 
 
 def top_k_cap_radians(node_count: int, k: int = TOP_K) -> float:
@@ -135,8 +140,46 @@ def rescale_rank_uniform_area(
     return _areas_to_target_cosines(areas)
 
 
-def _standard_normal_cdf(z: np.ndarray) -> np.ndarray:
-    return 0.5 * (1.0 + np.vectorize(math.erf)(z / math.sqrt(2.0)))
+#: Relative tolerance for the cancellation check in :func:`standard_normal_tail`.
+_TAIL_CANCELLATION_RTOL = 1e-9
+
+
+class DegenerateRescalingError(ValueError):
+    """Raised when a rescaling input is numerically degenerate.
+
+    Preferred over a silent clamp: a degenerate source would otherwise be given
+    an all-zero target-angle row that still satisfies the top-k cap contract,
+    so the failure would pass every downstream check unnoticed.
+    """
+
+
+def standard_normal_tail(z: np.ndarray) -> np.ndarray:
+    """Tail probability ``1 - Phi(z)``, guarded against catastrophic cancellation.
+
+    The returned values come from ``1 - 0.5 * (1 + erf(z / sqrt(2)))``. That form
+    loses all precision once ``erf`` saturates at 1 (around ``z >= 8.3``), where
+    it silently returns exactly ``0``. It is kept because it is the expression
+    the published 602-node run was computed with, and switching to ``erfc``
+    perturbs the targets by ~1e-16, which changes the published coordinate
+    SHA-256 for no accuracy benefit at the ``z`` values this cohort actually has
+    (max observed relative disagreement 5.7e-13).
+
+    Every call is validated against the cancellation-free ``erfc`` form and
+    raises :class:`DegenerateRescalingError` when the pinned expression has in
+    fact lost precision, so the failure can never pass silently.
+    """
+
+    pinned = 1.0 - 0.5 * (1.0 + np.vectorize(math.erf)(z / math.sqrt(2.0)))
+    exact = 0.5 * erfc(z / math.sqrt(2.0))
+    deviation = np.abs(pinned - exact) > _TAIL_CANCELLATION_RTOL * np.abs(exact)
+    if np.any(deviation):
+        worst = float(np.max(np.abs(z[deviation])))
+        raise DegenerateRescalingError(
+            "normal tail probability lost precision to catastrophic cancellation "
+            f"for {int(np.sum(deviation))} entries (max |z| = {worst:.4f}); "
+            "recompute the cohort with the erfc form and regenerate coordinates"
+        )
+    return pinned
 
 
 def enforce_top_k_band(
@@ -147,6 +190,9 @@ def enforce_top_k_band(
     Ranks ``1..k`` are rescaled onto ``(0, area_cap]`` and ranks ``k+1..N-1``
     onto ``(area_cap, 2]``, preserving the relative spacing of the raw values
     inside each band. ``area_cap = 2 * k / (N - 1)``.
+
+    Raises :class:`DegenerateRescalingError` rather than clamping when a source's
+    rank-``k`` area or its outer-band span collapses to zero.
     """
 
     n = ranks.shape[0]
@@ -159,10 +205,20 @@ def enforce_top_k_band(
         top = (row_rank >= 1) & (row_rank <= k)
         rest = row_rank > k
         area_k = float(areas[i, row_rank == k][0])
-        out[i, top] = area_cap * areas[i, top] / max(area_k, 1e-15)
+        if not area_k > 0.0:
+            raise DegenerateRescalingError(
+                f"source index {i}: rank-{k} raw area is {area_k!r}; the top-{k} "
+                "target angles would all collapse to 0"
+            )
+        out[i, top] = area_cap * areas[i, top] / area_k
         area_first = float(areas[i, row_rank == k + 1][0])
         area_last = float(areas[i, row_rank == n - 1][0])
-        span = max(area_last - area_first, 1e-15)
+        span = area_last - area_first
+        if not span > 0.0:
+            raise DegenerateRescalingError(
+                f"source index {i}: outer-band raw area span is {span!r}; the "
+                f"rank>{k} target angles carry no ordering information"
+            )
         t = (areas[i, rest] - area_first) / span
         out[i, rest] = area_cap + (2.0 - area_cap) * (t + offset) / (1.0 + offset)
     np.fill_diagonal(out, 0.0)
@@ -182,8 +238,14 @@ def rescale_cosine_zcdf_band(ranks: np.ndarray, similarity: np.ndarray) -> np.nd
     np.fill_diagonal(work, np.nan)
     mean = np.nanmean(work, axis=1, keepdims=True)
     std = np.nanstd(work, axis=1, keepdims=True)
-    z = (work - mean) / np.maximum(std, 1e-15)
-    tail = 1.0 - _standard_normal_cdf(np.nan_to_num(z, nan=0.0))
+    degenerate = np.flatnonzero(~(std.ravel() > 0.0))
+    if degenerate.size:
+        raise DegenerateRescalingError(
+            f"source indices {degenerate.tolist()[:5]} have zero cosine spread; "
+            "z-normalisation is undefined"
+        )
+    z = (work - mean) / std
+    tail = standard_normal_tail(np.nan_to_num(z, nan=0.0))
     areas = enforce_top_k_band(2.0 * tail, ranks)
     return _areas_to_target_cosines(areas)
 
@@ -280,12 +342,15 @@ def check_rescaling_contract(
         monotone_violations += int(np.sum(np.diff(ordered) < -1e-12))
         ordered_cos = similarity[i, keep][idx]
         monotone_violations += int(np.sum(np.diff(ordered_cos) > 1e-12))
+    # Global extrema are taken over every non-self pair, not over one band, so
+    # that they stay correct as diagnostics even when monotonicity is violated.
+    non_self = ranks >= 1
     return {
         "top_k_cap_radians": cap,
         "max_target_angle_rank_le_k": float(np.max(angles[top])),
         "min_target_angle_rank_gt_k": float(np.min(angles[rest])),
-        "max_target_angle": float(np.max(angles[rest])),
-        "min_target_angle": float(np.min(angles[top])),
+        "max_target_angle": float(np.max(angles[non_self])),
+        "min_target_angle": float(np.min(angles[non_self])),
         "top_k_inside_cap": bool(np.max(angles[top]) <= cap + 1e-12),
         "rest_outside_cap": bool(np.min(angles[rest]) > cap),
         "monotone_violations": monotone_violations,
@@ -694,11 +759,124 @@ def coordinate_digest(node_ids: Sequence[str], coords: np.ndarray) -> str:
     return digest.hexdigest()
 
 
+def acceptance_report(metrics: dict, thresholds: dict) -> tuple[dict[str, bool], bool]:
+    """Evaluate the baseline acceptance gates against this layout's metrics.
+
+    Reported whether or not they pass — an artifact that hides a failed gate is
+    worse than one that never claimed to check it.
+    """
+
+    checks = {
+        "bottom_decile_false_close_count": bool(
+            metrics["bottom_decile_false_close_count"]
+            <= thresholds["bottom_decile_false_close_count_max"]
+        ),
+        "mean_recall_at_5": bool(
+            metrics["mean_recall_at_5"] >= thresholds["mean_recall_at_5_min"]
+        ),
+        "node_coverage_at_5": bool(
+            metrics["hit_rate_at_5"] >= thresholds["node_coverage_at_5_min"]
+        ),
+        "union_edge_rmse_radians": bool(
+            metrics["union_edge_rmse_radians_original_acos"]
+            <= thresholds["union_edge_rmse_radians_max"]
+        ),
+        "unit_norm_max_error": bool(
+            metrics["unit_norm_max_error"] <= thresholds["unit_norm_max_error_max"]
+        ),
+    }
+    return checks, all(checks.values())
+
+
+#: ``layout_report`` keys the baseline defines that this algorithm cannot fill.
+#: They are emitted as ``null`` rather than dropped, so a consumer written
+#: against the baseline schema still finds the key it expects.
+_NULL_LAYOUT_REPORT_KEYS: dict[str, str] = {
+    "nodes_with_true_top5_count": (
+        "withheld: the baseline field counts sources with at least one hit, not "
+        "sources with all five; use hit_rate_at_5 instead"
+    ),
+    "ranking_constraint_count": (
+        "not applicable: this objective uses a listwise softmax over all "
+        "non-neighbours, not a fixed set of ranking triples; see "
+        "exclusivity_comparison_count"
+    ),
+    "sampled_nonedge_count": (
+        "not applicable: no sampling is performed; see enumerated_nonedge_count"
+    ),
+}
+
+
+def baseline_compatible_layout_report(
+    metrics: dict,
+    baseline_layout_report: dict,
+    extra: dict,
+) -> dict:
+    """Emit every key the baseline ``layout_report`` defines, plus new fields."""
+
+    thresholds = dict(baseline_layout_report["acceptance_thresholds"])
+    checks, passed = acceptance_report(metrics, thresholds)
+    report = dict(extra)
+    report.update(metrics)
+    report.update(
+        {
+            "acceptance_thresholds": thresholds,
+            "acceptance_checks": checks,
+            "acceptance_passed": passed,
+            "audit_similarity_supplied": True,
+            "bottom_decile_false_close_policy": (
+                "per-source cosine-bottom-decile non-neighbours "
+                "(floor(0.1 * (N - 1)) per source) placed strictly closer than "
+                "that source's farthest true top-5 coordinate neighbour"
+            ),
+            "clustering_policy": baseline_layout_report.get("clustering_policy"),
+            "edge_target_rmse_radians": metrics[
+                "union_edge_rmse_radians_rescaled_target"
+            ],
+            "union_edge_rmse_radians": metrics["union_edge_rmse_radians_original_acos"],
+            "node_coverage_at_5": metrics["hit_rate_at_5"],
+            "private_hub_count": 0,
+            "private_hub_edge_count": 0,
+            "report_only": True,
+        }
+    )
+    for key, reason in _NULL_LAYOUT_REPORT_KEYS.items():
+        report[key] = None
+        report[f"{key}_null_reason"] = reason
+    missing = set(baseline_layout_report) - set(report)
+    if missing:
+        raise ValueError(f"layout_report is missing baseline keys: {sorted(missing)}")
+    return report
+
+
+def layout_provenance(baseline_provenance: dict, coordinate_sha256: str) -> dict:
+    """Provenance that identifies *this* layout run, not the baseline's.
+
+    Lineage fields (cohort / registry / vector-set digests) are inherited because
+    the 48D inputs really are the baseline's. Everything that describes how the
+    coordinates were produced is overwritten, and the baseline's own identifiers
+    are preserved under ``source_*`` so the derivation stays traceable.
+    """
+
+    provenance = dict(baseline_provenance)
+    provenance["source_run_id"] = baseline_provenance.get("run_id")
+    provenance["source_layout_method"] = baseline_provenance.get("layout_method")
+    provenance["run_id"] = LAYOUT_RUN_ID
+    provenance["layout_method"] = (
+        "graph-only S² force layout with rank-rescaled angular targets; "
+        "no high-dimensional coordinate projection"
+    )
+    provenance["layout_algorithm"] = LAYOUT_ALGORITHM
+    provenance["coordinate_sha256"] = coordinate_sha256
+    return provenance
+
+
 def build_public_json(
     baseline: dict,
     node_ids: Sequence[str],
     coords: np.ndarray,
     layout_report: dict,
+    coordinate_sha256: str,
 ) -> dict:
     """Reproduce the baseline public schema with new coordinates."""
 
@@ -721,7 +899,7 @@ def build_public_json(
     graph["layout_report"] = layout_report
     return {
         "graph": graph,
-        "provenance": dict(baseline["provenance"]),
+        "provenance": layout_provenance(baseline["provenance"], coordinate_sha256),
         "public_hub_edge_count": 0,
         "public_hub_node_count": 0,
         "schema_version": baseline["schema_version"],
@@ -770,10 +948,11 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--artifact-dir", type=Path, default=DEFAULT_ARTIFACT_DIR)
     parser.add_argument("--output-dir", type=Path, default=DEFAULT_OUTPUT_DIR)
-    parser.add_argument(
+    selection = parser.add_mutually_exclusive_group()
+    selection.add_argument(
         "--candidate", default="rank_uniform_area", choices=sorted(RESCALERS)
     )
-    parser.add_argument("--compare-all", action="store_true")
+    selection.add_argument("--compare-all", action="store_true")
     parser.add_argument("--starts", type=int, default=8)
     parser.add_argument("--seed", type=int, default=DEFAULT_SEED)
     parser.add_argument("--stress-weight", type=float, default=1.0)
@@ -838,6 +1017,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         artifacts[name] = (coords, target_cosines)
         runs[name] = {
             "rescaling": name,
+            "rescaling_policy": RESCALING_POLICY[name],
             "contract": contract,
             "metrics": metrics,
             "multistart_objectives": result.start_objectives,
@@ -863,13 +1043,13 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     with baseline_path.open() as handle:
         baseline = json.load(handle)
-    baseline_ids = [node["node_id"] for node in baseline["graph"]["nodes"]]
+    baseline_by_id = {node["node_id"]: node for node in baseline["graph"]["nodes"]}
     baseline_coords = np.asarray(
         [
             [
-                baseline["graph"]["nodes"][baseline_ids.index(node_id)]["x"],
-                baseline["graph"]["nodes"][baseline_ids.index(node_id)]["y"],
-                baseline["graph"]["nodes"][baseline_ids.index(node_id)]["z"],
+                baseline_by_id[node_id]["x"],
+                baseline_by_id[node_id]["y"],
+                baseline_by_id[node_id]["z"],
             ]
             for node_id in ids
         ],
@@ -901,18 +1081,20 @@ def main(argv: Sequence[str] | None = None) -> int:
     write_coordinates_csv(coordinates_path, ids, coords)
 
     non_edge_pairs = n * (n - 1) // 2 - len(union_rows)
-    layout_report = {
-        "algorithm": "rank_rescaled_spherical_nca_v1",
+    coord_digest = coordinate_digest(ids, coords)
+    layout_extra = {
+        "algorithm": LAYOUT_ALGORITHM,
         "rescaling": chosen,
         "edge_target_policy": (
             f"rank-based rescaled angular target ({chosen}): {RESCALING_POLICY[chosen]}"
         ),
         "negative_sampling_policy": (
-            "complete deterministic enumeration of all C(602, 2) = 180901 "
+            f"complete deterministic enumeration of all {n * (n - 1) // 2} "
             "unordered pairs; repulsion strength derives from the pair's exact "
             "48D cosine rank, no uniform margin"
         ),
-        "sampled_nonedge_count": non_edge_pairs,
+        "enumerated_nonedge_count": non_edge_pairs,
+        "exclusivity_comparison_count": n * TOP_K * (n - 1 - TOP_K),
         "seed": config.seed,
         "multistart_count": config.multistart_count,
         "multistart_seeds": runs[chosen]["multistart_seeds"],
@@ -934,11 +1116,15 @@ def main(argv: Sequence[str] | None = None) -> int:
             "gtol": config.gtol,
             "max_iterations": config.max_iterations,
         },
-        "coordinate_sha256": coordinate_digest(ids, coords),
-        **{key: value for key, value in runs[chosen]["metrics"].items()},
+        "coordinate_sha256": coord_digest,
     }
+    layout_report = baseline_compatible_layout_report(
+        runs[chosen]["metrics"],
+        baseline["graph"]["layout_report"],
+        layout_extra,
+    )
 
-    public = build_public_json(baseline, ids, coords, layout_report)
+    public = build_public_json(baseline, ids, coords, layout_report, coord_digest)
     public_path = out_dir / "spherical-graph-public.json"
     with public_path.open("w") as handle:
         json.dump(public, handle, indent=2, sort_keys=True)
@@ -947,6 +1133,24 @@ def main(argv: Sequence[str] | None = None) -> int:
         "node_count": n,
         "top5_cap_radians": top_k_cap_radians(n),
         "selected_rescaling": chosen,
+        "layout_run_id": LAYOUT_RUN_ID,
+        "layout_algorithm": LAYOUT_ALGORITHM,
+        "acceptance": {
+            "thresholds": layout_report["acceptance_thresholds"],
+            "checks": layout_report["acceptance_checks"],
+            "passed": layout_report["acceptance_passed"],
+        },
+        "environment": {
+            "python": platform.python_version(),
+            "platform": platform.platform(),
+            "numpy": np.__version__,
+            "scipy": scipy.__version__,
+            "determinism_scope": (
+                "byte-identical coordinates are guaranteed only for this "
+                "python/numpy/scipy/BLAS combination; L-BFGS-B and the Gram "
+                "matmul depend on BLAS reduction order and thread count"
+            ),
+        },
         "candidates": runs,
         "baseline": {
             "source": str(baseline_path),
