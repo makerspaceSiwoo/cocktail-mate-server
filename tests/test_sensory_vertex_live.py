@@ -338,13 +338,10 @@ class FakeStorage:
         if self.assert_api_keys_absent:
             assert all(variable not in os.environ for variable in API_KEY_ENV_VARS)
 
-    def preflight_project_permissions(self, **kwargs: Any) -> None:
+    def find_compatible_bucket(self, **kwargs: Any) -> str:
         self._check_environment()
         self.permission_calls.append(kwargs)
-
-    def create_run_bucket(self, **kwargs: Any) -> None:
-        self._check_environment()
-        self.create_calls.append(kwargs)
+        return f"{kwargs['bucket_prefix']}{'0' * 32}"
 
     def upload_jsonl_create_only(self, **kwargs: Any) -> None:
         self._check_environment()
@@ -725,16 +722,13 @@ def test_submit_uses_exact_boundary_once_and_isolates_api_keys(
     assert storage.permission_calls == [
         {
             "project": DEFAULT_PROJECT,
+            "bucket_prefix": storage.upload_calls[0]["bucket"][:-32],
+            "location": BUCKET_LOCATION,
+            "lifecycle_days": 1,
             "permissions": tuple(sorted(REQUIRED_GCS_PERMISSIONS)),
         }
     ]
-    assert len(storage.create_calls) == 1
-    assert storage.create_calls[0] == {
-        "bucket": storage.upload_calls[0]["bucket"],
-        "project": DEFAULT_PROJECT,
-        "location": BUCKET_LOCATION,
-        "lifecycle_days": 1,
-    }
+    assert storage.create_calls == []
     assert len(storage.upload_calls) == 1
     upload = storage.upload_calls[0]
     assert upload["data"] == (tmp_path / "requests-00.jsonl").read_bytes()
@@ -811,10 +805,10 @@ def test_failed_gcs_permission_preflight_blocks_mutations_and_is_not_repeated(
         return _identity()
 
     class BlockedStorage(FakeStorage):
-        def preflight_project_permissions(self, **kwargs: Any) -> None:
-            super().preflight_project_permissions(**kwargs)
+        def find_compatible_bucket(self, **kwargs: Any) -> str:
+            super().find_compatible_bucket(**kwargs)
             raise VertexLiveError(
-                "required GCS project permissions are missing",
+                "required existing-bucket GCS permissions are missing",
                 phase="gcs_permission_preflight",
             )
 
@@ -1083,33 +1077,20 @@ def test_cleanup_gate_and_verified_object_then_bucket_deletion(
     assert captured.value.phase == "cleanup_gate"
     assert adc_calls == 0
 
-    ledger = _make_all_jobs_downloaded(ledger_path)
-    bucket = ledger["bucket"]["name"]
-    objects = (
-        StorageObject(name="input/0.jsonl", generation="1", size=10),
-        StorageObject(name="output/0.jsonl", generation="2", size=20),
-    )
+    _make_all_jobs_downloaded(ledger_path)
     storage = FakeStorage()
-    storage.list_results = [objects, ()]
 
-    result = cleanup_run(
-        execute_live=True,
-        ledger_path=ledger_path,
-        credential_loader=counted_adc,
-        storage_factory=lambda credentials: storage,
-        clock=lambda: "2026-08-06T04:00:00+00:00",
-    )
-
-    assert result["status"] == "RUN_BUCKET_DELETED"
-    assert len(storage.list_calls) == 2
-    assert storage.list_calls == [
-        {"bucket": bucket, "prefix": ""},
-        {"bucket": bucket, "prefix": ""},
-    ]
-    assert len(storage.delete_calls) == len(objects)
-    assert [call["generation"] for call in storage.delete_calls] == ["1", "2"]
-    assert storage.delete_bucket_calls == [{"bucket": bucket}]
-    assert _read_ledger(ledger_path)["cleanup"]["state"] == "VERIFIED_DELETED"
+    with pytest.raises(VertexLiveError, match="shared existing bucket"):
+        cleanup_run(
+            execute_live=True,
+            ledger_path=ledger_path,
+            credential_loader=counted_adc,
+            storage_factory=lambda credentials: storage,
+            clock=lambda: "2026-08-06T04:00:00+00:00",
+        )
+    assert adc_calls == 0
+    assert storage.list_calls == storage.delete_calls == []
+    assert storage.delete_bucket_calls == []
 
 
 class _Response:
@@ -1134,14 +1115,37 @@ def test_concrete_storage_upload_uses_generation_zero_precondition(
     class Session:
         def __init__(self, credentials: Any):
             self.post_calls: list[tuple[str, dict[str, Any]]] = []
+            self.get_calls: list[tuple[str, dict[str, Any]]] = []
 
         def post(self, url: str, **kwargs: Any) -> _Response:
             self.post_calls.append((url, kwargs))
-            if url.endswith(":testIamPermissions"):
-                return _Response(value={"permissions": kwargs["json"]["permissions"]})
-            if url.endswith("/b"):
-                return _Response(value=kwargs["json"])
             return _Response(value={"bucket": "bucket", "name": "input.jsonl"})
+
+        def get(self, url: str, **kwargs: Any) -> _Response:
+            self.get_calls.append((url, kwargs))
+            if url.endswith("/iam/testPermissions"):
+                permissions = [
+                    value for key, value in kwargs["params"] if key == "permissions"
+                ]
+                return _Response(value={"permissions": permissions})
+            return _Response(
+                value={
+                    "items": [
+                        {
+                            "name": f"{kwargs['params']['prefix']}{'0' * 32}",
+                            "location": BUCKET_LOCATION,
+                            "lifecycle": {
+                                "rule": [
+                                    {
+                                        "action": {"type": "Delete"},
+                                        "condition": {"age": 1},
+                                    }
+                                ]
+                            },
+                        }
+                    ]
+                }
+            )
 
         def close(self) -> None:
             pass
@@ -1153,15 +1157,12 @@ def test_concrete_storage_upload_uses_generation_zero_precondition(
     )
     gateway = GoogleStorageGateway(object())
 
-    gateway.preflight_project_permissions(
+    bucket = gateway.find_compatible_bucket(
         project=DEFAULT_PROJECT,
-        permissions=tuple(sorted(REQUIRED_GCS_PERMISSIONS)),
-    )
-    gateway.create_run_bucket(
-        bucket="bucket",
-        project=DEFAULT_PROJECT,
+        bucket_prefix="cm-sensory-test-",
         location=BUCKET_LOCATION,
         lifecycle_days=1,
+        permissions=tuple(sorted(REQUIRED_GCS_PERMISSIONS)),
     )
     gateway.upload_jsonl_create_only(
         bucket="bucket",
@@ -1170,24 +1171,20 @@ def test_concrete_storage_upload_uses_generation_zero_precondition(
         metadata={"object-sha256": "a" * 64},
     )
 
-    assert len(session.post_calls) == 3
-    preflight_url, preflight = session.post_calls[0]
-    assert preflight_url.endswith(":testIamPermissions")
-    assert set(preflight["json"]["permissions"]) == REQUIRED_GCS_PERMISSIONS
-    _, bucket_create = session.post_calls[1]
-    assert bucket_create["json"]["iamConfiguration"] == {
-        "uniformBucketLevelAccess": {"enabled": True},
-        "publicAccessPrevention": "enforced",
-    }
-    assert bucket_create["json"]["lifecycle"] == {
-        "rule": [
-            {
-                "action": {"type": "Delete"},
-                "condition": {"age": 1},
-            }
-        ]
-    }
-    _, request = session.post_calls[2]
+    assert bucket == f"cm-sensory-test-{'0' * 32}"
+    assert len(session.get_calls) == 2
+    list_url, bucket_list = session.get_calls[0]
+    assert list_url.endswith("/b")
+    assert bucket_list["params"]["project"] == DEFAULT_PROJECT
+    assert bucket_list["params"]["userProject"] == DEFAULT_PROJECT
+    permission_url, permission_test = session.get_calls[1]
+    assert permission_url.endswith("/iam/testPermissions")
+    assert ("userProject", DEFAULT_PROJECT) in permission_test["params"]
+    assert "cloudresourcemanager" not in " ".join(
+        url for url, _ in session.get_calls + session.post_calls
+    )
+    assert len(session.post_calls) == 1
+    _, request = session.post_calls[0]
     assert request["params"]["uploadType"] == "multipart"
     assert request["params"]["ifGenerationMatch"] == "0"
     assert b'"object-sha256"' in request["data"]

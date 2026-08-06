@@ -71,11 +71,10 @@ API_KEY_ENV_VARS = ("GEMINI_API_KEY", "GOOGLE_API_KEY")
 UNKNOWN_REMOTE_STATE = "UNKNOWN_REMOTE_STATE"
 CREATION_DISPATCHING = "CREATION_DISPATCHING"
 UPLOAD_DISPATCHING = "UPLOAD_DISPATCHING"
-BUCKET_CREATE_DISPATCHING = "BUCKET_CREATE_DISPATCHING"
+EXISTING_BUCKET_REQUIRED = "EXISTING_BUCKET_REQUIRED"
 DOWNLOAD_DISPATCHING = "DOWNLOAD_DISPATCHING"
 STORAGE_API = "https://storage.googleapis.com/storage/v1"
 STORAGE_UPLOAD_API = "https://storage.googleapis.com/upload/storage/v1"
-RESOURCE_MANAGER_API = "https://cloudresourcemanager.googleapis.com/v1"
 DEFAULT_TIMEOUT_SECONDS = 30.0
 LEDGER_SCHEMA_VERSION = 1
 EVENT_SCHEMA_VERSION = 1
@@ -104,12 +103,9 @@ LIVE_PILOT_APPROVED_MANIFEST_SHA256 = (
 _CLOUD_PLATFORM_SCOPE = "https://www.googleapis.com/auth/cloud-platform"
 REQUIRED_GCS_PERMISSIONS = frozenset(
     {
-        "storage.buckets.create",
-        "storage.buckets.delete",
         "storage.buckets.get",
         "storage.buckets.list",
         "storage.objects.create",
-        "storage.objects.delete",
         "storage.objects.get",
         "storage.objects.list",
     }
@@ -155,21 +151,15 @@ class StorageObject:
 
 
 class StorageGateway(Protocol):
-    def preflight_project_permissions(
+    def find_compatible_bucket(
         self,
         *,
         project: str,
-        permissions: Sequence[str],
-    ) -> None: ...
-
-    def create_run_bucket(
-        self,
-        *,
-        bucket: str,
-        project: str,
+        bucket_prefix: str,
         location: str,
         lifecycle_days: int,
-    ) -> None: ...
+        permissions: Sequence[str],
+    ) -> str: ...
 
     def upload_jsonl_create_only(
         self,
@@ -390,24 +380,67 @@ class GoogleStorageGateway:
             )
         return value
 
-    def preflight_project_permissions(
+    def find_compatible_bucket(
         self,
         *,
         project: str,
+        bucket_prefix: str,
+        location: str,
+        lifecycle_days: int,
         permissions: Sequence[str],
-    ) -> None:
+    ) -> str:
         requested = tuple(sorted(set(permissions)))
         response = self._request(
-            "post",
-            f"{RESOURCE_MANAGER_API}/projects/{quote(project, safe='')}:"
-            "testIamPermissions",
+            "get",
+            f"{STORAGE_API}/b",
             phase="gcs_permission_preflight",
-            json={"permissions": list(requested)},
+            params={
+                "project": project,
+                "userProject": project,
+                "prefix": bucket_prefix,
+                "fields": "items(name,location,lifecycle)",
+            },
         )
-        payload = self._object_json(
-            response,
+        payload = self._object_json(response, phase="gcs_permission_preflight")
+        items = payload.get("items", [])
+        lifecycle = {
+            "rule": [
+                {
+                    "action": {"type": "Delete"},
+                    "condition": {"age": lifecycle_days},
+                }
+            ]
+        }
+        if not isinstance(items, list):
+            raise VertexLiveError(
+                "GCS bucket list returned invalid metadata",
+                phase="gcs_permission_preflight",
+            )
+        compatible = sorted(
+            str(item["name"])
+            for item in items
+            if isinstance(item, Mapping)
+            and isinstance(item.get("name"), str)
+            and str(item["name"]).startswith(bucket_prefix)
+            and str(item.get("location", "")).upper() == location.upper()
+            and item.get("lifecycle") == lifecycle
+        )
+        if not compatible:
+            raise VertexLiveError(
+                "no compatible existing GCS bucket is available",
+                phase="gcs_permission_preflight",
+            )
+        bucket = compatible[0]
+        response = self._request(
+            "get",
+            f"{STORAGE_API}/b/{quote(bucket, safe='')}/iam/testPermissions",
             phase="gcs_permission_preflight",
+            params=[
+                *[("permissions", permission) for permission in requested],
+                ("userProject", project),
+            ],
         )
+        payload = self._object_json(response, phase="gcs_permission_preflight")
         granted = payload.get("permissions", [])
         if not isinstance(granted, list) or any(
             not isinstance(permission, str) for permission in granted
@@ -418,60 +451,10 @@ class GoogleStorageGateway:
             )
         if set(granted) != set(requested):
             raise VertexLiveError(
-                "required GCS project permissions are missing",
+                "required existing-bucket GCS permissions are missing",
                 phase="gcs_permission_preflight",
             )
-
-    def create_run_bucket(
-        self,
-        *,
-        bucket: str,
-        project: str,
-        location: str,
-        lifecycle_days: int,
-    ) -> None:
-        payload = {
-            "name": bucket,
-            "location": location.upper(),
-            "iamConfiguration": {
-                "uniformBucketLevelAccess": {"enabled": True},
-                "publicAccessPrevention": "enforced",
-            },
-            "lifecycle": {
-                "rule": [
-                    {
-                        "action": {"type": "Delete"},
-                        "condition": {"age": lifecycle_days},
-                    }
-                ]
-            },
-        }
-        response = self._request(
-            "post",
-            f"{STORAGE_API}/b",
-            phase="bucket_create",
-            params={"project": project},
-            json=payload,
-        )
-        metadata = self._object_json(response, phase="bucket_create")
-        iam = metadata.get("iamConfiguration")
-        lifecycle = metadata.get("lifecycle")
-        uniform = (
-            iam.get("uniformBucketLevelAccess") if isinstance(iam, Mapping) else None
-        )
-        if (
-            metadata.get("name") != bucket
-            or str(metadata.get("location", "")).upper() != location.upper()
-            or not isinstance(uniform, Mapping)
-            or uniform.get("enabled") is not True
-            or not isinstance(iam, Mapping)
-            or iam.get("publicAccessPrevention") != "enforced"
-            or lifecycle != payload["lifecycle"]
-        ):
-            raise VertexLiveError(
-                "created bucket does not satisfy the reviewed controls",
-                phase="bucket_validation",
-            )
+        return bucket
 
     def upload_jsonl_create_only(
         self,
@@ -763,6 +746,21 @@ def _bucket_name(manifest_sha256: str) -> str:
     return f"cm-sensory-{_sha256_text(PROJECT)[:10]}-{manifest_sha256[:32]}"
 
 
+def _bucket_prefix() -> str:
+    return f"cm-sensory-{_sha256_text(PROJECT)[:10]}-"
+
+
+def _is_compatible_bucket_name(value: object) -> bool:
+    return (
+        isinstance(value, str)
+        and re.fullmatch(
+            rf"{re.escape(_bucket_prefix())}[0-9a-f]{{32}}",
+            value,
+        )
+        is not None
+    )
+
+
 def _run_prefix(manifest_sha256: str) -> str:
     return f"runs/{manifest_sha256}"
 
@@ -789,8 +787,9 @@ def _new_ledger(
         "shard_record_count": shard_record_count,
         "historical_cost_usd": "0.00",
         "bucket": {
-            "name": _bucket_name(manifest_sha256),
-            "state": BUCKET_CREATE_DISPATCHING,
+            "name": None,
+            "state": EXISTING_BUCKET_REQUIRED,
+            "ownership": "EXISTING_SHARED",
             "created_at": now,
             "updated_at": now,
         },
@@ -836,12 +835,19 @@ def _validate_ledger_structure(ledger: Mapping[str, Any]) -> None:
         not isinstance(manifest_sha, str)
         or re.fullmatch(r"[0-9a-f]{64}", manifest_sha) is None
         or not isinstance(bucket, Mapping)
-        or bucket.get("name") != _bucket_name(manifest_sha)
+        or (
+            bucket.get("state") == EXISTING_BUCKET_REQUIRED
+            and bucket.get("name") is not None
+        )
+        or (
+            bucket.get("state") != EXISTING_BUCKET_REQUIRED
+            and not _is_compatible_bucket_name(bucket.get("name"))
+        )
+        or bucket.get("ownership") != "EXISTING_SHARED"
         or bucket.get("state")
         not in {
-            BUCKET_CREATE_DISPATCHING,
+            EXISTING_BUCKET_REQUIRED,
             "READY",
-            "DELETED",
             UNKNOWN_REMOTE_STATE,
         }
         or not isinstance(preflight, Mapping)
@@ -1470,10 +1476,18 @@ def submit_shard_once(
                         now=preflight["updated_at"],
                     )
                     try:
-                        storage.preflight_project_permissions(
+                        selected_bucket_name = storage.find_compatible_bucket(
                             project=PROJECT,
+                            bucket_prefix=_bucket_prefix(),
+                            location=BUCKET_LOCATION,
+                            lifecycle_days=GCS_LIFECYCLE_DAYS,
                             permissions=tuple(sorted(REQUIRED_GCS_PERMISSIONS)),
                         )
+                        if not _is_compatible_bucket_name(selected_bucket_name):
+                            raise VertexLiveError(
+                                "GCS returned an incompatible existing bucket",
+                                phase="gcs_permission_preflight",
+                            )
                     except Exception as error:
                         preflight["state"] = (
                             "BLOCKED"
@@ -1489,6 +1503,18 @@ def submit_shard_once(
                             now=preflight["updated_at"],
                         )
                         raise
+                    bucket = ledger.get("bucket")
+                    if (
+                        not isinstance(bucket, dict)
+                        or bucket.get("state") != EXISTING_BUCKET_REQUIRED
+                    ):
+                        raise VertexLiveError(
+                            "live ledger bucket selection state is invalid",
+                            phase="ledger_validation",
+                        )
+                    bucket["name"] = selected_bucket_name
+                    bucket["state"] = "READY"
+                    bucket["updated_at"] = clock()
                     preflight["state"] = "PASSED"
                     preflight["updated_at"] = clock()
                     _save_ledger(
@@ -1504,44 +1530,14 @@ def submit_shard_once(
                         phase="ledger_validation",
                     )
                 bucket_name = bucket.get("name")
-                if bucket_name != _bucket_name(manifest_sha):
+                if not isinstance(bucket_name, str) or not _is_compatible_bucket_name(
+                    bucket_name
+                ):
                     raise VertexLiveError(
                         "live ledger bucket identity is invalid",
                         phase="ledger_validation",
                     )
-                if bucket.get("state") == BUCKET_CREATE_DISPATCHING:
-                    _save_ledger(
-                        ledger_path,
-                        ledger,
-                        event="bucket-create-dispatching",
-                        now=now,
-                    )
-                    try:
-                        storage.create_run_bucket(
-                            bucket=bucket_name,
-                            project=PROJECT,
-                            location=BUCKET_LOCATION,
-                            lifecycle_days=GCS_LIFECYCLE_DAYS,
-                        )
-                    except Exception:
-                        bucket["state"] = UNKNOWN_REMOTE_STATE
-                        bucket["updated_at"] = clock()
-                        _save_ledger(
-                            ledger_path,
-                            ledger,
-                            event="bucket-create-unknown",
-                            now=bucket["updated_at"],
-                        )
-                        raise
-                    bucket["state"] = "READY"
-                    bucket["updated_at"] = clock()
-                    _save_ledger(
-                        ledger_path,
-                        ledger,
-                        event="bucket-ready",
-                        now=bucket["updated_at"],
-                    )
-                elif bucket.get("state") != "READY":
+                if bucket.get("state") != "READY":
                     raise VertexLiveError(
                         "run bucket remote state is not known ready",
                         phase="bucket_gate",
@@ -1944,9 +1940,13 @@ def cleanup_run(
                 phase="cleanup_gate",
             )
         bucket = ledger.get("bucket")
-        if not isinstance(bucket, dict) or bucket.get("state") != "READY":
+        if (
+            not isinstance(bucket, dict)
+            or bucket.get("state") != "READY"
+            or bucket.get("ownership") != "DEDICATED_RUN"
+        ):
             raise VertexLiveError(
-                "cleanup requires a known-ready run bucket",
+                "cleanup of a shared existing bucket is disabled",
                 phase="cleanup_gate",
             )
         cleanup = ledger.get("cleanup")
