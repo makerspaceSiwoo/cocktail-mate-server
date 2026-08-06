@@ -57,6 +57,7 @@ from app.sensory_embedding.vertex_batch import (
 from app.sensory_embedding.registry import SENSORY_V2_REGISTRY
 
 PROJECT = DEFAULT_PROJECT
+PROJECT_NUMBER = "504835101849"
 LOCATION = "global"
 BUCKET_LOCATION = "ASIA-NORTHEAST3"
 MODEL_ID = MODEL
@@ -111,7 +112,8 @@ REQUIRED_GCS_PERMISSIONS = frozenset(
     }
 )
 _JOB_NAME_PATTERN = re.compile(
-    rf"^projects/{re.escape(PROJECT)}/locations/{re.escape(LOCATION)}"
+    rf"^projects/(?:{re.escape(PROJECT)}|{PROJECT_NUMBER})"
+    rf"/locations/{re.escape(LOCATION)}"
     r"/batchPredictionJobs/[^/]+$"
 )
 

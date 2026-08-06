@@ -613,6 +613,19 @@ def test_reviewed_prep_v2_manifest_digest_is_exactly_pinned() -> None:
     )
 
 
+def test_vertex_job_name_accepts_reviewed_numeric_project_name_only() -> None:
+    numeric_name = (
+        "projects/504835101849/locations/global/"
+        "batchPredictionJobs/123456789"
+    )
+    assert vertex_live._validate_job_name(numeric_name) == numeric_name
+    with pytest.raises(VertexLiveError, match="outside the reviewed"):
+        vertex_live._validate_job_name(
+            "projects/999999999999/locations/global/"
+            "batchPredictionJobs/123456789"
+        )
+
+
 def test_one_measured_request_cannot_unlock_full_production(
     tmp_path: Path,
 ) -> None:
