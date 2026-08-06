@@ -101,6 +101,9 @@ LIVE_PILOT_APPROVAL_MARKER_SHA256 = (
 LIVE_PILOT_APPROVED_MANIFEST_SHA256 = (
     "06f7a1398537812bf5e31daecba9be7dfaa495ad54149003b6008034d059f396"
 )
+LIVE_FULL_APPROVED_MANIFEST_SHA256 = (
+    "48381f029a85e7d611a717da81ed1d9151aa99f258bb3d72ef543c6a107f66f7"
+)
 _CLOUD_PLATFORM_SCOPE = "https://www.googleapis.com/auth/cloud-platform"
 REQUIRED_GCS_PERMISSIONS = frozenset(
     {
@@ -456,10 +459,7 @@ class GoogleStorageGateway:
             f"{STORAGE_API}/b/{quote(bucket, safe='')}/iam/testPermissions",
             phase="gcs_permission_preflight",
             params=[
-                *[
-                    ("permissions", permission)
-                    for permission in bucket_permissions
-                ],
+                *[("permissions", permission) for permission in bucket_permissions],
                 ("userProject", project),
             ],
         )
@@ -765,13 +765,7 @@ def _load_manifest(path: Path) -> tuple[dict[str, Any], str]:
     return manifest, sha256_bytes(payload)
 
 
-def load_dedicated_bucket_contract(
-    path: Path,
-    *,
-    manifest_sha256: str,
-) -> DedicatedBucketContract:
-    """Load a local reviewed destination contract without exposing its name."""
-
+def _load_dedicated_bucket_json(path: Path) -> Mapping[str, Any]:
     try:
         if path.stat().st_mode & 0o777 != 0o600:
             raise VertexLiveError(
@@ -791,6 +785,17 @@ def load_dedicated_bucket_contract(
             "dedicated bucket contract is invalid",
             phase="bucket_contract",
         )
+    return raw
+
+
+def load_dedicated_bucket_contract(
+    path: Path,
+    *,
+    manifest_sha256: str,
+) -> DedicatedBucketContract:
+    """Load a local reviewed destination contract without exposing its name."""
+
+    raw = _load_dedicated_bucket_json(path)
     name = raw.get("bucket_name")
     location = raw.get("location")
     valid = (
@@ -812,6 +817,53 @@ def load_dedicated_bucket_contract(
             phase="bucket_contract",
         )
     return DedicatedBucketContract(name=str(name), location=str(location))
+
+
+def bind_dedicated_bucket_contract(
+    *,
+    source_path: Path,
+    manifest_path: Path,
+    output_path: Path,
+) -> dict[str, object]:
+    """Create a full-manifest-bound contract without cloud or credential access."""
+
+    raw = dict(_load_dedicated_bucket_json(source_path))
+    manifest_sha256 = sha256_bytes(manifest_path.read_bytes())
+    if (
+        raw.get("manifest_sha256") != LIVE_PILOT_APPROVED_MANIFEST_SHA256
+        or raw.get("project_id") != PROJECT
+        or raw.get("bucket_name_sha256") != _sha256_text(str(raw.get("bucket_name")))
+        or not _is_compatible_bucket_name(raw.get("bucket_name"))
+        or raw.get("lifecycle_delete_age_days") != GCS_LIFECYCLE_DAYS
+        or raw.get("uniform_bucket_level_access") is not True
+        or raw.get("public_access_prevention") != "enforced"
+        or raw.get("outcome") != "created"
+    ):
+        raise VertexLiveError(
+            "source dedicated bucket contract is not the reviewed pilot contract",
+            phase="bucket_contract",
+        )
+    if manifest_sha256 != LIVE_FULL_APPROVED_MANIFEST_SHA256:
+        raise VertexLiveError(
+            "full manifest SHA-256 is not approved",
+            phase="bucket_contract",
+        )
+    raw["manifest_sha256"] = manifest_sha256
+    raw["approval_scope"] = "full602-conditional-success"
+    raw["source_contract_sha256"] = sha256_bytes(source_path.read_bytes())
+    atomic_create(output_path, _json_bytes(raw))
+    os.chmod(output_path, 0o600)
+    load_dedicated_bucket_contract(
+        output_path,
+        manifest_sha256=manifest_sha256,
+    )
+    return {
+        "status": "FULL_DEDICATED_BUCKET_BOUND",
+        "manifest_sha256": manifest_sha256,
+        "contract_sha256": sha256_bytes(output_path.read_bytes()),
+        "network_calls": 0,
+        "database_accesses": 0,
+    }
 
 
 def _bucket_name(manifest_sha256: str) -> str:
@@ -1452,9 +1504,9 @@ def submit_shard_once(
     storage_factory: StorageFactory = _default_storage_factory,
     batch_factory: BatchFactory = _default_batch_factory,
     clock: Clock = utc_now,
+    dedicated_bucket: DedicatedBucketContract | None = None,
     _run_scope: str = FULL_RUN_SCOPE,
     _user_approval_marker: str = "",
-    _dedicated_bucket: DedicatedBucketContract | None = None,
 ) -> dict[str, Any]:
     """Upload one immutable shard and create its Batch job exactly once."""
 
@@ -1463,6 +1515,10 @@ def submit_shard_once(
         manifest, manifest_sha = _load_manifest(manifest_path)
         try:
             if _run_scope == FULL_RUN_SCOPE:
+                if manifest_sha != LIVE_FULL_APPROVED_MANIFEST_SHA256:
+                    raise VertexSensoryBatchError(
+                        "live full manifest SHA-256 is not the approved digest"
+                    )
                 _validate_live_manifest(manifest)
             elif _run_scope == PILOT_RUN_SCOPE:
                 if manifest_sha != LIVE_PILOT_APPROVED_MANIFEST_SHA256:
@@ -1486,6 +1542,11 @@ def submit_shard_once(
             manifest,
             shard_index,
         )
+        if dedicated_bucket is None:
+            raise VertexLiveError(
+                "live create requires an explicit dedicated bucket contract",
+                phase="bucket_contract",
+            )
         now = clock()
         if ledger_path.exists():
             ledger = _load_ledger(
@@ -1511,9 +1572,7 @@ def submit_shard_once(
                     if _run_scope == FULL_RUN_SCOPE
                     else LIVE_PILOT_SHARD_SIZE
                 ),
-                dedicated_bucket_name=(
-                    _dedicated_bucket.name if _dedicated_bucket is not None else None
-                ),
+                dedicated_bucket_name=(dedicated_bucket.name),
             )
 
         if ledger.get("run_scope", FULL_RUN_SCOPE) != _run_scope:
@@ -1561,16 +1620,8 @@ def submit_shard_once(
                         selected_bucket_name = storage.find_compatible_bucket(
                             project=PROJECT,
                             bucket_prefix=_bucket_prefix(),
-                            expected_bucket=(
-                                _dedicated_bucket.name
-                                if _dedicated_bucket is not None
-                                else None
-                            ),
-                            location=(
-                                _dedicated_bucket.location
-                                if _dedicated_bucket is not None
-                                else BUCKET_LOCATION
-                            ),
+                            expected_bucket=dedicated_bucket.name,
+                            location=dedicated_bucket.location,
                             lifecycle_days=GCS_LIFECYCLE_DAYS,
                             permissions=tuple(sorted(REQUIRED_GCS_PERMISSIONS)),
                         )
@@ -1786,7 +1837,7 @@ def submit_pilot_shard_once(
         clock=clock,
         _run_scope=PILOT_RUN_SCOPE,
         _user_approval_marker=user_approval_marker,
-        _dedicated_bucket=dedicated_bucket,
+        dedicated_bucket=dedicated_bucket,
     )
 
 

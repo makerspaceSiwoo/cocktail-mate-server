@@ -12,6 +12,7 @@ from app.sensory_embedding.vertex_live import (
     LIVE_FLAG,
     LIVE_PILOT_FLAG,
     VertexLiveError,
+    bind_dedicated_bucket_contract,
     cleanup_run,
     download_outputs,
     load_dedicated_bucket_contract,
@@ -33,6 +34,7 @@ def _parser() -> argparse.ArgumentParser:
     create = commands.add_parser("create", help="Upload and create one shard once.")
     create.add_argument(LIVE_FLAG, action="store_true")
     create.add_argument("--manifest", type=Path, required=True)
+    create.add_argument("--dedicated-bucket-file", type=Path, required=True)
     create.add_argument("--ledger", type=Path, required=True)
     create.add_argument("--shard-index", type=int, required=True)
     create.add_argument("--allow-soft-stop-override", action="store_true")
@@ -68,6 +70,14 @@ def _parser() -> argparse.ArgumentParser:
     )
     cleanup.add_argument(LIVE_FLAG, action="store_true")
     cleanup.add_argument("--ledger", type=Path, required=True)
+
+    bind = commands.add_parser(
+        "bind-dedicated-bucket",
+        help="Bind a reviewed pilot bucket contract to the approved full manifest.",
+    )
+    bind.add_argument("--source-contract", type=Path, required=True)
+    bind.add_argument("--manifest", type=Path, required=True)
+    bind.add_argument("--output", type=Path, required=True)
     return parser
 
 
@@ -75,12 +85,19 @@ def main(argv: Sequence[str] | None = None) -> int:
     arguments = _parser().parse_args(argv)
     try:
         if arguments.command == "create":
+            manifest_sha256 = hashlib.sha256(
+                arguments.manifest.read_bytes()
+            ).hexdigest()
             result = submit_shard_once(
                 execute_live=arguments.execute_live,
                 manifest_path=arguments.manifest,
                 ledger_path=arguments.ledger,
                 shard_index=arguments.shard_index,
                 allow_soft_stop_override=arguments.allow_soft_stop_override,
+                dedicated_bucket=load_dedicated_bucket_contract(
+                    arguments.dedicated_bucket_file,
+                    manifest_sha256=manifest_sha256,
+                ),
             )
         elif arguments.command == "pilot-create":
             manifest_sha256 = hashlib.sha256(
@@ -109,6 +126,12 @@ def main(argv: Sequence[str] | None = None) -> int:
                 ledger_path=arguments.ledger,
                 shard_index=arguments.shard_index,
                 output_dir=arguments.output_dir,
+            )
+        elif arguments.command == "bind-dedicated-bucket":
+            result = bind_dedicated_bucket_contract(
+                source_path=arguments.source_contract,
+                manifest_path=arguments.manifest,
+                output_path=arguments.output,
             )
         else:
             result = cleanup_run(

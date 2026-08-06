@@ -32,6 +32,7 @@ from app.sensory_embedding.vertex_live import (
     BUCKET_LOCATION,
     LIVE_CORPUS_ROWS,
     LIVE_ID_ALLOWLIST_SHA256,
+    LIVE_FULL_APPROVED_MANIFEST_SHA256,
     LIVE_PILOT_APPROVAL_MARKER,
     LIVE_PILOT_APPROVAL_MARKER_SHA256,
     LIVE_PILOT_APPROVED_MANIFEST_SHA256,
@@ -218,6 +219,9 @@ def _manifest_fixture(
     }
     path = tmp_path / "manifest.json"
     path.write_text(json.dumps(manifest, sort_keys=True), encoding="utf-8")
+    vertex_live.LIVE_FULL_APPROVED_MANIFEST_SHA256 = hashlib.sha256(
+        path.read_bytes()
+    ).hexdigest()
     return path, manifest
 
 
@@ -427,6 +431,7 @@ def _submit(
         manifest_path=manifest_path,
         ledger_path=ledger_path,
         shard_index=0,
+        dedicated_bucket=_TEST_DEDICATED_BUCKET,
         credential_loader=_identity,
         storage_factory=lambda credentials: storage,
         batch_factory=lambda credentials: batch,
@@ -607,22 +612,65 @@ def test_pilot_content_cannot_be_rebound_with_all_self_consistent_hashes(
     assert adc_calls == 0
 
 
+def test_full_content_cannot_be_rebound_with_all_self_consistent_hashes(
+    tmp_path: Path,
+) -> None:
+    manifest_path, manifest = _manifest_fixture(tmp_path)
+    shard_path = tmp_path / "requests-00.jsonl"
+    lines = shard_path.read_text(encoding="utf-8").splitlines()
+    first = json.loads(lines[0])
+    first["request"]["contents"][0]["parts"][0]["text"] = "tampered full prompt"
+    lines[0] = json.dumps(first, separators=(",", ":"))
+    payload = ("\n".join(lines) + "\n").encode()
+    shard_path.write_bytes(payload)
+    manifest["shards"][0]["sha256"] = hashlib.sha256(payload).hexdigest()
+    first_request = next(
+        request
+        for request in manifest["requests"]
+        if request["row_index"] == 0 and request["axis_order"] == 0
+    )
+    first_request["prompt_sha256"] = hashlib.sha256(b"tampered full prompt").hexdigest()
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+    adc_calls = 0
+
+    def forbidden_adc() -> AdcIdentity:
+        nonlocal adc_calls
+        adc_calls += 1
+        raise AssertionError("ADC must not be loaded")
+
+    with pytest.raises(VertexLiveError) as captured:
+        submit_shard_once(
+            execute_live=True,
+            manifest_path=manifest_path,
+            ledger_path=tmp_path / "full-ledger.json",
+            shard_index=0,
+            dedicated_bucket=_TEST_DEDICATED_BUCKET,
+            credential_loader=forbidden_adc,
+        )
+    assert captured.value.phase == "offline_gate"
+    assert adc_calls == 0
+
+
 def test_reviewed_prep_v2_manifest_digest_is_exactly_pinned() -> None:
     assert LIVE_PILOT_APPROVED_MANIFEST_SHA256 == (
         "06f7a1398537812bf5e31daecba9be7dfaa495ad54149003b6008034d059f396"
     )
 
 
+def test_reviewed_full_manifest_digest_is_exactly_pinned() -> None:
+    assert LIVE_FULL_APPROVED_MANIFEST_SHA256 == (
+        "48381f029a85e7d611a717da81ed1d9151aa99f258bb3d72ef543c6a107f66f7"
+    )
+
+
 def test_vertex_job_name_accepts_reviewed_numeric_project_name_only() -> None:
     numeric_name = (
-        "projects/504835101849/locations/global/"
-        "batchPredictionJobs/123456789"
+        "projects/504835101849/locations/global/batchPredictionJobs/123456789"
     )
     assert vertex_live._validate_job_name(numeric_name) == numeric_name
     with pytest.raises(VertexLiveError, match="outside the reviewed"):
         vertex_live._validate_job_name(
-            "projects/999999999999/locations/global/"
-            "batchPredictionJobs/123456789"
+            "projects/999999999999/locations/global/batchPredictionJobs/123456789"
         )
 
 
@@ -749,7 +797,7 @@ def test_submit_uses_exact_boundary_once_and_isolates_api_keys(
         {
             "project": DEFAULT_PROJECT,
             "bucket_prefix": storage.upload_calls[0]["bucket"][:-32],
-            "expected_bucket": None,
+            "expected_bucket": _TEST_DEDICATED_BUCKET.name,
             "location": BUCKET_LOCATION,
             "lifecycle_days": 1,
             "permissions": tuple(sorted(REQUIRED_GCS_PERMISSIONS)),
@@ -847,6 +895,7 @@ def test_failed_gcs_permission_preflight_blocks_mutations_and_is_not_repeated(
             manifest_path=manifest_path,
             ledger_path=ledger_path,
             shard_index=0,
+            dedicated_bucket=_TEST_DEDICATED_BUCKET,
             credential_loader=counted_adc,
             storage_factory=lambda credentials: storage,
             batch_factory=lambda credentials: batch,
@@ -865,6 +914,7 @@ def test_failed_gcs_permission_preflight_blocks_mutations_and_is_not_repeated(
             manifest_path=manifest_path,
             ledger_path=ledger_path,
             shard_index=0,
+            dedicated_bucket=_TEST_DEDICATED_BUCKET,
             credential_loader=counted_adc,
             storage_factory=lambda credentials: storage,
             batch_factory=lambda credentials: batch,
@@ -906,6 +956,7 @@ def test_cumulative_budget_gates_run_before_adc(
             manifest_path=manifest_path,
             ledger_path=ledger_path,
             shard_index=1,
+            dedicated_bucket=_TEST_DEDICATED_BUCKET,
             credential_loader=forbidden_adc,
         )
     assert captured.value.phase == "budget_gate"
@@ -939,6 +990,7 @@ def test_service_account_project_mismatch_blocks_before_factories(
             manifest_path=manifest_path,
             ledger_path=ledger_path,
             shard_index=0,
+            dedicated_bucket=_TEST_DEDICATED_BUCKET,
             credential_loader=wrong_identity,
             storage_factory=forbidden_factory,
         )
@@ -1213,9 +1265,7 @@ def test_concrete_storage_upload_uses_generation_zero_precondition(
         "storage.buckets.list",
     ) not in permission_test["params"]
     assert {
-        value
-        for key, value in permission_test["params"]
-        if key == "permissions"
+        value for key, value in permission_test["params"] if key == "permissions"
     } == set(REQUIRED_GCS_PERMISSIONS) - {"storage.buckets.list"}
     assert "cloudresourcemanager" not in " ".join(
         url for url, _ in session.get_calls + session.post_calls
