@@ -1,4 +1,4 @@
 -r requirements-base.txt
 
 # 배포 이미지용 canonical ORM 패키지. 로컬 Docker는 인접 저장소를 직접 설치한다.
-cocktail-mate-db @ git+ssh://git@github.com/makerspaceSiwoo/cocktail-mate-db.git@v0.7.1
+cocktail-mate-db @ git+ssh://git@github.com/makerspaceSiwoo/cocktail-mate-db.git@v0.8.0
