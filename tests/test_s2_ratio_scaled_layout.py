@@ -154,16 +154,23 @@ def test_clamp_report_counts_pairs_pushed_past_pi() -> None:
 # ---------------------------------------------------------------------------
 
 
-def _clustered_points(count: int, cap_radius: float, seed: int) -> np.ndarray:
+def _points_in_polar_cap(count: int, cap_radius: float, seed: int) -> np.ndarray:
+    """``count`` points confined to a polar cap of angular radius ``cap_radius``.
+
+    Sampled uniformly in ``(z, phi)`` inside the cap, so the fixture really is a
+    tight cluster rather than a whole-sphere sample with a rescaled z column.
+    """
+
     rng = np.random.default_rng(seed)
-    points = rng.standard_normal((count, 3))
-    points[:, 2] = abs(points[:, 2]) * 0.0 + 1.0 / max(cap_radius, 1e-6)
-    return layout.normalise_rows(points)
+    z = rng.uniform(math.cos(cap_radius), 1.0, count)
+    phi = rng.uniform(0.0, 2.0 * math.pi, count)
+    radius = np.sqrt(np.maximum(0.0, 1.0 - z * z))
+    return np.column_stack((radius * np.cos(phi), radius * np.sin(phi), z))
 
 
 def test_nearest_neighbour_angles_separate_uniform_from_clustered() -> None:
     spread = layout.fibonacci_sphere(200)
-    clustered = _clustered_points(200, 0.05, seed=1)
+    clustered = _points_in_polar_cap(200, 0.05, seed=1)
     spread_nn = layout.nearest_neighbour_angles(spread)
     clustered_nn = layout.nearest_neighbour_angles(clustered)
     assert float(np.median(spread_nn)) > 5.0 * float(np.median(clustered_nn))
@@ -173,7 +180,7 @@ def test_nearest_neighbour_angles_separate_uniform_from_clustered() -> None:
 def test_covering_radius_is_much_larger_for_a_clustered_set() -> None:
     probes = layout.fibonacci_sphere(4096)
     spread = layout.fibonacci_sphere(200)
-    clustered = _clustered_points(200, 0.05, seed=2)
+    clustered = _points_in_polar_cap(200, 0.05, seed=2)
     assert layout.covering_radius(spread, probes) < 0.25
     assert layout.covering_radius(clustered, probes) > 2.5
 
@@ -193,7 +200,7 @@ def test_equal_area_cell_counts_match_hand_computed_cells() -> None:
 
 def test_cell_occupancy_separates_uniform_from_clustered() -> None:
     spread = layout.fibonacci_sphere(602)
-    clustered = _clustered_points(602, 0.05, seed=3)
+    clustered = _points_in_polar_cap(602, 0.05, seed=3)
     spread_summary = layout.cell_occupancy_summary(
         layout.equal_area_cell_counts(spread, 10, 10), 602
     )
@@ -374,7 +381,6 @@ def test_recall_state_incremental_updates_match_a_full_recount() -> None:
 def test_refinement_improves_recall_without_breaking_the_constraints() -> None:
     rng = np.random.default_rng(29)
     vectors = rng.standard_normal((60, 8))
-    angles = layout.angle_matrix(layout.exact_cosine_matrix(vectors))
     _, order = layout.similarity_rank_matrix(
         layout.exact_cosine_matrix(vectors), list(range(60))
     )
@@ -411,7 +417,6 @@ def test_refinement_improves_recall_without_breaking_the_constraints() -> None:
         )
         <= constraints["pair_angle_ks_ceiling"] + 1e-12
     )
-    assert angles.shape == (60, 60)
 
 
 # ---------------------------------------------------------------------------
@@ -435,3 +440,185 @@ def test_coordinates_in_id_order_requires_every_node() -> None:
     assert coords.tolist() == [[0.0, 1.0, 0.0], [0.0, 0.0, 1.0]]
     with pytest.raises(ValueError, match="missing"):
         layout.coordinates_in_id_order(lookup, [1, 3])
+
+
+# ---------------------------------------------------------------------------
+# realised (coordinate-level) stretch — the user-visible near-field contract
+# ---------------------------------------------------------------------------
+
+
+def test_realised_stretch_profile_detects_near_field_compression() -> None:
+    source = np.linspace(0.1, 1.4, 1000)
+    expanded = source * 2.0
+    profile = layout.realised_stretch_by_source_decile(source, expanded)
+    assert len(profile) == layout.STRETCH_DECILES
+    assert all(row["median"] == pytest.approx(2.0) for row in profile)
+    assert all(row["fraction_below_1"] == 0.0 for row in profile)
+
+    squeezed = expanded.copy()
+    nearest = source <= np.quantile(source, 0.1)
+    squeezed[nearest] = source[nearest] * 0.9
+    squeezed_profile = layout.realised_stretch_by_source_decile(source, squeezed)
+    assert squeezed_profile[0]["median"] == pytest.approx(0.9)
+    assert squeezed_profile[0]["fraction_below_1"] == pytest.approx(1.0)
+    assert squeezed_profile[-1]["median"] == pytest.approx(2.0)
+
+
+def test_nearest_fraction_compressed_counts_only_the_closest_pairs() -> None:
+    source = np.linspace(0.1, 1.4, 1000)
+    observed = source * 2.0
+    assert layout.nearest_fraction_compressed(source, observed) == 0.0
+    observed[:50] = source[:50] * 0.5
+    assert layout.nearest_fraction_compressed(source, observed) == pytest.approx(1.0)
+    assert layout.nearest_fraction_compressed(
+        source, observed, fraction=0.5
+    ) == pytest.approx(0.1)
+
+
+def test_order_fidelity_always_reports_the_realised_stretch_fields() -> None:
+    rng = np.random.default_rng(31)
+    coords = layout.normalise_rows(rng.standard_normal((40, 3)))
+    angles = layout.angle_matrix(
+        layout.exact_cosine_matrix(rng.standard_normal((40, 6)))
+    )
+    metrics = layout.order_fidelity_metrics(coords, angles, inversion_samples=5000)
+    for key in (
+        "realised_stretch_by_source_decile",
+        "near_decile_median_stretch",
+        "nearest_5pct_fraction_compressed",
+        "all_pairs_fraction_compressed",
+    ):
+        assert key in metrics
+    # No target supplied: target-relative fields must be None, not a foreign value.
+    assert metrics["target_reference"] is None
+    assert metrics["angle_stress"] is None
+    assert metrics["normalised_angle_stress"] is None
+    assert metrics["pearson_coord_vs_target"] is None
+
+    targets = 2.0 * angles
+    with_targets = layout.order_fidelity_metrics(
+        coords, angles, targets, inversion_samples=5000
+    )
+    assert with_targets["angle_stress"] > 0.0
+    assert with_targets["target_reference"] == "own layout target"
+
+
+# ---------------------------------------------------------------------------
+# gates, floors and selection logic
+# ---------------------------------------------------------------------------
+
+
+def test_check_thresholds_reports_each_failed_metric() -> None:
+    row = {"a": 0.6, "b": 10.0}
+    thresholds = {"a": (">=", 0.5), "b": ("<=", 5.0)}
+    result = layout.check_thresholds(row, thresholds)
+    assert result["passed"] is False
+    assert result["failed"] == ["b"]
+    assert result["checks"]["a"]["passed"] is True
+    assert result["checks"]["b"]["value"] == 10.0
+    assert layout.check_thresholds({"a": 0.6, "b": 1.0}, thresholds)["passed"] is True
+
+
+def test_revised_gates_are_looser_than_the_original_ones() -> None:
+    row = {
+        "mean_recall_at_5": 0.5636,
+        "hit_rate_at_5": 0.97,
+        "union_edge_rmse_radians_original_acos": 0.24,
+        "unit_norm_max_error": 2.3e-16,
+        "bottom_decile_false_close_count": 420.0,
+    }
+    assert layout.check_thresholds(row, layout.REVISED_ACCEPTANCE_GATES)["passed"]
+    original = layout.check_thresholds(row, layout.ORIGINAL_ACCEPTANCE_GATES)
+    assert original["passed"] is False
+    assert set(original["failed"]) == {
+        "mean_recall_at_5",
+        "bottom_decile_false_close_count",
+    }
+
+
+def test_non_regression_floors_include_the_near_field_bounds() -> None:
+    assert layout.NON_REGRESSION_FLOORS["near_decile_median_stretch"] == (">=", 1.00)
+    assert layout.NON_REGRESSION_FLOORS["nearest_5pct_fraction_compressed"] == (
+        "<=",
+        0.20,
+    )
+    failing = {key: 0.0 for key in layout.NON_REGRESSION_FLOORS}
+    failing["nearest_5pct_fraction_compressed"] = 0.60
+    failing["near_decile_median_stretch"] = 0.9716
+    result = layout.check_thresholds(failing, layout.NON_REGRESSION_FLOORS)
+    assert result["passed"] is False
+    assert "near_decile_median_stretch" in result["failed"]
+    assert "nearest_5pct_fraction_compressed" in result["failed"]
+
+
+def test_borda_rank_sums_positions_on_all_three_axes() -> None:
+    rows = {
+        "best": {"separation": 3.0, "recall": 0.9, "ks": 0.10},
+        "middle": {"separation": 2.0, "recall": 0.5, "ks": 0.20},
+        "worst": {"separation": 1.0, "recall": 0.1, "ks": 0.30},
+    }
+    totals = layout.borda_rank(rows)
+    assert totals == {"best": 0.0, "middle": 3.0, "worst": 6.0}
+    # Winning one axis and losing two must lose to the reverse.
+    mixed = layout.borda_rank(
+        {
+            "a": {"separation": 3.0, "recall": 0.1, "ks": 0.30},
+            "b": {"separation": 1.0, "recall": 0.9, "ks": 0.10},
+        }
+    )
+    assert mixed["a"] == 2.0
+    assert mixed["b"] == 1.0
+
+
+def test_select_linear_candidate_prefers_lowest_ks_within_the_clamp_budget() -> None:
+    def run(clamped: float, ks: float) -> dict:
+        return {
+            "clamp": {"clamped_pair_fraction": clamped},
+            "evaluation": {"coverage": {"pair_angle_ks_vs_uniform_sphere": ks}},
+        }
+
+    runs = {
+        "k_max_antipodal": run(0.0, 0.11),
+        "k_median_match": run(1e-4, 0.09),
+        "k_ks_optimal": run(3e-5, 0.10),
+    }
+    assert layout.select_linear_candidate(runs) == "k_median_match"
+    # A candidate that clamps too much is ineligible however good its KS is.
+    runs["k_median_match"] = run(0.5, 0.01)
+    assert layout.select_linear_candidate(runs) == "k_ks_optimal"
+    # Nothing eligible at all falls back to the zero-clamp candidate.
+    runs = {name: run(0.5, 0.01) for name in runs}
+    assert layout.select_linear_candidate(runs) == "k_max_antipodal"
+
+
+# ---------------------------------------------------------------------------
+# refinement — the rejection path must actually reject
+# ---------------------------------------------------------------------------
+
+
+def test_refinement_rejects_every_move_under_an_impossible_ks_ceiling() -> None:
+    rng = np.random.default_rng(37)
+    vectors = rng.standard_normal((60, 8))
+    _, order = layout.similarity_rank_matrix(
+        layout.exact_cosine_matrix(vectors), list(range(60))
+    )
+    true_top_k = order[:, : layout.TOP_K]
+    coords = layout.normalise_rows(rng.standard_normal((60, 3)))
+    labels = np.asarray(["a"] * 30 + ["b"] * 30)
+    config = layout.RefineConfig(
+        max_passes=2, directions_per_radius=2, ks_max_absolute_increase=-1.0
+    )
+    refined, report = layout.refine_recall_constrained(
+        coords, true_top_k, labels, config
+    )
+    assert report["constraints"]["rejected_by_ks"] > 0
+    assert report["moved_node_count"] == 0
+    assert np.allclose(refined, coords, rtol=0.0, atol=1e-15)
+
+
+def test_count_degenerate_rows_sees_the_silent_pole_fallback() -> None:
+    coords = np.array([[1.0, 0.0, 0.0], [0.0, 0.0, 0.0], [0.0, 1e-15, 0.0]])
+    assert layout.count_degenerate_rows(coords) == 2
+    normalised = layout.normalise_rows(coords)
+    assert layout.unit_norm_max_error(normalised) <= 1e-12
+    assert layout.count_degenerate_rows(normalised) == 0

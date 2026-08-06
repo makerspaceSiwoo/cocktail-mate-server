@@ -36,9 +36,20 @@ After the surrogate stress optimiser converges, ``convex`` mode runs a
 constrained greedy refinement on the *real* metric (mean Recall@5). The
 refinement only accepts moves that keep the cluster separation ratio and the
 uniform-sphere KS statistic within a declared tolerance, so the coverage and
-separation goals are not traded away for recall.
+separation goals are not traded away for recall. **Every** layout in the
+comparison table receives the identical refinement (matched treatment), because
+comparing a recall-refined layout against unrefined ones is not like-for-like.
 
-Usage::
+The contract conditions hold for ``f`` by construction, but what the user sees
+is the projected 3D coordinates, where near pairs can end up *compressed*. That
+is measured directly (``realised_stretch_by_source_decile``,
+``nearest_5pct_fraction_compressed``), reported for every layout, and enforced:
+a candidate whose realised near-field decile median stretch is below
+``--min-near-decile-stretch`` is eliminated before ranking. If no candidate
+clears the floors the run reports ``BLOCKED`` and emits a frontier table rather
+than forcing a pick.
+
+Usage — these defaults reproduce the published artifacts, no extra flags::
 
     python scripts/s2_ratio_scaled_layout.py --mode convex
     python scripts/s2_ratio_scaled_layout.py --mode linear
@@ -51,6 +62,7 @@ import csv
 import hashlib
 import json
 import math
+import shutil
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -60,10 +72,16 @@ import numpy as np
 from scipy.optimize import minimize
 from scipy.stats import spearmanr
 
-DEFAULT_ARTIFACT_DIR = Path("/private/tmp/cocktail-mate-sensory-artifacts-602-v1")
+#: Durable in-repo artifact copy (``/private/tmp`` is volatile). ``sensory-batch/``
+#: is gitignored, so these inputs survive reboots without entering the commit.
+REPO_ROOT = Path(__file__).resolve().parents[1]
+DEFAULT_ARTIFACT_DIR = REPO_ROOT / "sensory-batch/run-20260806-full602-v1/artifacts"
 DEFAULT_RANKSCALED_DIR = Path("/private/tmp/cocktail-mate-s2-rankscaled-602-v1")
 DEFAULT_LINEAR_OUTPUT_DIR = Path("/private/tmp/cocktail-mate-s2-ratio-602-v1")
-DEFAULT_CONVEX_OUTPUT_DIR = Path("/private/tmp/cocktail-mate-s2-convex-602-v1")
+DEFAULT_CONVEX_OUTPUT_DIR = Path("/private/tmp/cocktail-mate-s2-convex-602-v2")
+DEFAULT_DURABLE_COPY_DIR = (
+    REPO_ROOT / "sensory-batch/run-20260806-full602-v1/s2-convex-v2"
+)
 DEFAULT_SEED = 20260806
 TOP_K = 5
 BOTTOM_DECILE_FRACTION = 0.10
@@ -76,11 +94,55 @@ DEFAULT_PROBE_POINTS = 131072
 #: Monte-Carlo replicates for the uniform-sphere reference values.
 DEFAULT_UNIFORM_REPLICATES = 32
 CELL_LAYOUTS: tuple[tuple[int, int], ...] = ((10, 10), (20, 20))
-#: Convex sweep grid mandated by the brief.
-SWEEP_A: tuple[float, ...] = (1.1, 1.2, 1.4, 1.6, 1.8)
+#: Convex sweep grid. ``a`` is the near-field expansion ratio and the separation
+#: lever, so the grid deliberately runs past ``pi / theta_max``; the combinations
+#: above the limit are rejected by contract and reported as rejected, never
+#: silently dropped.
+SWEEP_A: tuple[float, ...] = (1.1, 1.2, 1.4, 1.6, 1.8, 2.0, 2.2, 2.4)
 SWEEP_GAMMA: tuple[float, ...] = (1.5, 2.0, 3.0)
 #: Deterministic sample size for the coordinate pair-order inversion estimate.
 INVERSION_SAMPLES = 2_000_000
+#: Deciles used for the realised (coordinate-level) stretch profile.
+STRETCH_DECILES = 10
+#: "Nearest pairs" fraction for the compression check.
+NEAREST_FRACTION = 0.05
+
+#: Pipeline acceptance gates as they stood before the 2026-08-06 revision.
+ORIGINAL_ACCEPTANCE_GATES: dict[str, tuple[str, float]] = {
+    "mean_recall_at_5": (">=", 0.60),
+    "hit_rate_at_5": (">=", 0.90),
+    "union_edge_rmse_radians_original_acos": ("<=", 0.40),
+    "unit_norm_max_error": ("<=", 1e-12),
+    "bottom_decile_false_close_count": ("<=", 0.0),
+}
+#: Revised hard gates (user-approved 2026-08-06). Both sets are always reported.
+REVISED_ACCEPTANCE_GATES: dict[str, tuple[str, float]] = {
+    "mean_recall_at_5": (">=", 0.55),
+    "hit_rate_at_5": (">=", 0.90),
+    "union_edge_rmse_radians_original_acos": ("<=", 0.40),
+    "unit_norm_max_error": ("<=", 1e-12),
+    "bottom_decile_false_close_count": ("<=", 500.0),
+}
+#: Non-regression floors against the v1 convex layout. A candidate that misses
+#: any of these is eliminated before the Borda ranking — no silent lowering.
+NON_REGRESSION_FLOORS: dict[str, tuple[str, float]] = {
+    "mean_recall_at_5": (">=", 0.5236),
+    "hit_rate_at_5": (">=", 0.9684),
+    "bottom_decile_false_close_count": ("<=", 424.0),
+    "pair_angle_ks_vs_uniform_sphere": ("<=", 0.2040),
+    "covering_radius_radians": ("<=", 0.7100),
+    "empty_cells_100": ("<=", 21.0),
+    "unit_norm_max_error": ("<=", 1e-12),
+    "union_edge_rmse_radians_original_acos": ("<=", 0.40),
+    "near_decile_median_stretch": (">=", 1.00),
+    "nearest_5pct_fraction_compressed": ("<=", 0.20),
+}
+#: Separation goals (aspirational, not filters).
+SEPARATION_TARGETS: dict[str, tuple[str, float]] = {
+    "separation_ratio": (">=", 2.45),
+    "silhouette_mean": (">=", 0.28),
+    "centroid_angle_min": (">=", 0.80),
+}
 
 
 # ---------------------------------------------------------------------------
@@ -359,6 +421,59 @@ def target_monotonicity_violations(pair_angles: np.ndarray, targets: np.ndarray)
 
 
 # ---------------------------------------------------------------------------
+# frontier target families
+# ---------------------------------------------------------------------------
+
+
+def globally_scaled_targets(targets: np.ndarray, scale: float) -> np.ndarray:
+    """``min(scale * target, pi)`` — push every target further apart at once.
+
+    This is the most direct test of "what happens to top-k if high-similarity
+    pairs are pushed further apart": the shape of the target curve is unchanged,
+    only its overall size grows, and everything that would exceed ``pi`` piles up
+    at the antipode.
+    """
+
+    if scale <= 0.0:
+        raise ValueError("scale must be positive")
+    return np.minimum(scale * np.asarray(targets, dtype=np.float64), math.pi)
+
+
+def scale_clamp_report(targets: np.ndarray, scale: float) -> dict[str, float | int]:
+    """Pairs pushed past ``pi`` by a global scale, counted on unordered pairs."""
+
+    values = upper_triangle(np.asarray(targets, dtype=np.float64))
+    clamped = scale * values > math.pi + 1e-15
+    return {
+        "scale": scale,
+        "clamped_pair_count": int(np.sum(clamped)),
+        "total_pair_count": int(values.size),
+        "clamped_pair_fraction": float(np.mean(clamped)),
+        "max_unclamped_target_radians": float(scale * np.max(values)),
+    }
+
+
+def rank_uniform_area_targets(ranks: np.ndarray) -> np.ndarray:
+    """``1 - cos(theta) = 2 * rank / (N - 1)`` — the coverage upper bound.
+
+    Every source spreads its neighbours over the sphere by equal area, so the
+    layout fills the sphere by construction. It is included as the extreme end
+    of the frontier: maximum coverage, and whatever Recall@5 comes with it.
+    The per-source matrix is asymmetric, so it is symmetrised (the stress term
+    is symmetric anyway).
+    """
+
+    n = ranks.shape[0]
+    areas = 2.0 * ranks.astype(np.float64) / (n - 1)
+    np.fill_diagonal(areas, 0.0)
+    angles = np.arccos(np.clip(1.0 - areas, -1.0, 1.0))
+    np.fill_diagonal(angles, 0.0)
+    symmetric = 0.5 * (angles + angles.T)
+    np.fill_diagonal(symmetric, 0.0)
+    return symmetric
+
+
+# ---------------------------------------------------------------------------
 # optimiser
 # ---------------------------------------------------------------------------
 
@@ -374,8 +489,23 @@ class LayoutConfig:
     gtol: float = 1e-12
 
 
+def count_degenerate_rows(coords: np.ndarray, tolerance: float = 1e-12) -> int:
+    """Rows whose norm is too small to define a direction.
+
+    :func:`normalise_rows` replaces these with the north pole. A silent fallback
+    would hide a collapsed optimisation behind a perfect ``unit_norm_max_error``,
+    so every caller that can report it counts them first.
+    """
+
+    return int(np.sum(np.linalg.norm(coords, axis=1) < tolerance))
+
+
 def normalise_rows(coords: np.ndarray) -> np.ndarray:
-    """Project rows onto the unit sphere; zero rows fall back to the pole."""
+    """Project rows onto the unit sphere; zero rows fall back to the pole.
+
+    Use :func:`count_degenerate_rows` to detect the fallback — it is reported in
+    ``degenerate_fallback_count`` rather than being swallowed.
+    """
 
     norms = np.linalg.norm(coords, axis=1, keepdims=True)
     safe = np.where(norms < 1e-12, 1.0, norms)
@@ -394,13 +524,18 @@ def angle_stress(coords: np.ndarray, targets: np.ndarray) -> float:
     return float(np.sum(residual * residual)) / 2.0
 
 
-def make_objective(targets: np.ndarray):
+def make_objective(targets: np.ndarray, centering_weight: float = 0.0):
     """Objective and gradient of the unweighted all-pairs angle stress.
 
     Every one of the ``C(n, 2)`` pairs carries weight 1.0 — no rank weighting, no
     edge/non-edge distinction — because the stretch treats all pairs alike.
     Coordinates are parametrised by unnormalised rows normalised inside, so
     L-BFGS-B runs unconstrained.
+
+    ``centering_weight`` adds ``lambda * ||(1/N) sum x_i||^2``. Pair angles are
+    invariant to it in the ideal case (it only penalises the layout leaning to
+    one side of the sphere), so it attacks the one-sidedness directly and is
+    almost free of rank distortion.
     """
 
     n = targets.shape[0]
@@ -416,6 +551,10 @@ def make_objective(targets: np.ndarray):
         grad_dots = -residual / np.sqrt(1.0 - dots * dots)
         np.fill_diagonal(grad_dots, 0.0)
         grad_coords = (grad_dots + grad_dots.T) @ coords
+        if centering_weight:
+            mean = np.mean(coords, axis=0)
+            loss += centering_weight * float(mean @ mean)
+            grad_coords = grad_coords + (2.0 * centering_weight / n) * mean
         radial = np.sum(grad_coords * coords, axis=1, keepdims=True)
         return loss, ((grad_coords - radial * coords) / norms).ravel()
 
@@ -443,12 +582,14 @@ class LayoutResult:
     elapsed_seconds: float = 0.0
 
 
-def optimise_layout(targets: np.ndarray, config: LayoutConfig) -> LayoutResult:
+def optimise_layout(
+    targets: np.ndarray, config: LayoutConfig, centering_weight: float = 0.0
+) -> LayoutResult:
     """Multistart L-BFGS-B; start 0 is spectral, the rest are seeded gaussians."""
 
     started = time.perf_counter()
     n = targets.shape[0]
-    objective = make_objective(targets)
+    objective = make_objective(targets, centering_weight)
     starts = [spectral_initialisation(targets)]
     kinds = ["spectral"]
     seeds = [config.seed]
@@ -579,6 +720,41 @@ def cell_occupancy_summary(counts: np.ndarray, node_count: int) -> dict[str, flo
     }
 
 
+def mean_vector_norm(coords: np.ndarray) -> float:
+    """``|| (1/N) sum x_i ||`` — how far the point set leans to one side.
+
+    Zero means perfectly balanced over the sphere; one means every node sits on
+    the same spot. A uniform 602-point sample averages about 0.041. This is the
+    single most direct measure of the "everything is crammed onto one side of
+    the ball" complaint.
+    """
+
+    return float(np.linalg.norm(np.mean(coords, axis=0)))
+
+
+def best_hemisphere_fraction(coords: np.ndarray) -> float:
+    """Share of nodes inside the hemisphere centred on the mean direction.
+
+    About 0.53 for a uniform sample (a random point set always leans a little);
+    1.0 means every node fits in one half of the sphere.
+    """
+
+    mean = np.mean(coords, axis=0)
+    norm = float(np.linalg.norm(mean))
+    if norm < 1e-15:
+        return 0.5
+    return float(np.mean(coords @ (mean / norm) >= 0.0))
+
+
+def bias_metrics(coords: np.ndarray) -> dict[str, float]:
+    """One-sidedness of the layout, with the uniform-sphere expectations."""
+
+    return {
+        "mean_vector_norm": mean_vector_norm(coords),
+        "best_hemisphere_fraction": best_hemisphere_fraction(coords),
+    }
+
+
 def coverage_metrics(coords: np.ndarray, probes: np.ndarray) -> dict[str, object]:
     """Section A of the brief for one coordinate set."""
 
@@ -590,6 +766,7 @@ def coverage_metrics(coords: np.ndarray, probes: np.ndarray) -> dict[str, object
         "covering_radius_probe_points": int(probes.shape[0]),
         "pair_angle_ks_vs_uniform_sphere": ks_statistic_uniform_sphere(pair_angles),
         "pair_angle": angle_summary(pair_angles),
+        **bias_metrics(coords),
     }
     cells: dict[str, object] = {}
     for bands, sectors in CELL_LAYOUTS:
@@ -615,6 +792,8 @@ def uniform_reference(
     nn: list[dict[str, float]] = []
     covering: list[float] = []
     ks: list[float] = []
+    bias: list[dict[str, float]] = []
+    median_pair: list[float] = []
     cells: dict[str, list[dict[str, float]]] = {
         f"cells_{b * s}": [] for b, s in CELL_LAYOUTS
     }
@@ -622,9 +801,10 @@ def uniform_reference(
         coords = normalise_rows(rng.standard_normal((node_count, 3)))
         nn.append(angle_summary(nearest_neighbour_angles(coords)))
         covering.append(covering_radius(coords, probes))
-        ks.append(
-            ks_statistic_uniform_sphere(upper_triangle(coordinate_angle_matrix(coords)))
-        )
+        pairs = upper_triangle(coordinate_angle_matrix(coords))
+        ks.append(ks_statistic_uniform_sphere(pairs))
+        median_pair.append(float(np.median(pairs)))
+        bias.append(bias_metrics(coords))
         for bands, sectors in CELL_LAYOUTS:
             counts = equal_area_cell_counts(coords, bands, sectors)
             cells[f"cells_{bands * sectors}"].append(
@@ -645,6 +825,13 @@ def uniform_reference(
         "covering_radius_radians_mean": float(np.mean(covering)),
         "covering_radius_radians_max": float(np.max(covering)),
         "pair_angle_ks_vs_uniform_sphere_mean": float(np.mean(ks)),
+        "pair_angle_median_mean": float(np.mean(median_pair)),
+        "mean_vector_norm_mean": float(
+            np.mean([row["mean_vector_norm"] for row in bias])
+        ),
+        "best_hemisphere_fraction_mean": float(
+            np.mean([row["best_hemisphere_fraction"] for row in bias])
+        ),
         "equal_area_cells": {
             name: {
                 "std_mean": float(np.mean([row["std"] for row in rows])),
@@ -763,30 +950,91 @@ def pair_order_inversion_rate(
     }
 
 
+def realised_stretch_by_source_decile(
+    source: np.ndarray, observed: np.ndarray, deciles: int = STRETCH_DECILES
+) -> list[dict[str, float]]:
+    """Realised ``observed / source`` profile per source-angle decile.
+
+    This is the coordinate-level version of the contract's "near pairs open up a
+    little, far pairs open up a lot". The target function ``f`` satisfies it by
+    construction; the projected 3D coordinates need not, so it is measured here
+    and reported for every layout.
+    """
+
+    src = np.asarray(source, dtype=np.float64)
+    obs = np.asarray(observed, dtype=np.float64)
+    ratio = obs / src
+    edges = np.quantile(src, np.linspace(0.0, 1.0, deciles + 1))
+    index = np.clip(np.searchsorted(edges, src, side="right") - 1, 0, deciles - 1)
+    profile: list[dict[str, float]] = []
+    for decile in range(deciles):
+        mask = index == decile
+        values = ratio[mask]
+        profile.append(
+            {
+                "decile": decile + 1,
+                "pair_count": int(values.size),
+                "source_angle_low": float(edges[decile]),
+                "source_angle_high": float(edges[decile + 1]),
+                "min": float(np.min(values)),
+                "p25": float(np.percentile(values, 25)),
+                "median": float(np.median(values)),
+                "p75": float(np.percentile(values, 75)),
+                "fraction_below_1": float(np.mean(values < 1.0)),
+            }
+        )
+    return profile
+
+
+def nearest_fraction_compressed(
+    source: np.ndarray, observed: np.ndarray, fraction: float = NEAREST_FRACTION
+) -> float:
+    """Share of the closest ``fraction`` of source pairs that ended up compressed."""
+
+    src = np.asarray(source, dtype=np.float64)
+    count = max(1, int(round(fraction * src.size)))
+    nearest = np.argsort(src, kind="stable")[:count]
+    return float(np.mean(np.asarray(observed)[nearest] / src[nearest] < 1.0))
+
+
 def order_fidelity_metrics(
     coords: np.ndarray,
     angles: np.ndarray,
-    targets: np.ndarray,
+    targets: np.ndarray | None = None,
     *,
     inversion_samples: int = INVERSION_SAMPLES,
     seed: int = DEFAULT_SEED,
 ) -> dict[str, object]:
-    """Section B: how faithfully the coordinates keep the source angle order."""
+    """Section B: how faithfully the coordinates keep the source angle order.
+
+    ``targets`` is optional: stress and target correlations are only meaningful
+    for a layout that actually aimed at those targets, so layouts that never did
+    (baseline, rank-scaled) report ``None`` instead of a number computed against
+    a foreign target.
+    """
 
     observed = upper_triangle(coordinate_angle_matrix(coords))
     source = upper_triangle(angles)
-    target = upper_triangle(targets)
     ratios = observed / source
-    residual = observed - target
-    stress = float(np.sum(residual * residual))
-    denominator = float(np.sum(target * target))
-    return {
+    profile = realised_stretch_by_source_decile(source, observed)
+    metrics: dict[str, object] = {
         "spearman_coord_vs_source_angle": float(spearmanr(observed, source).statistic),
-        "spearman_coord_vs_target": float(spearmanr(observed, target).statistic),
-        "pearson_coord_vs_target": float(np.corrcoef(observed, target)[0, 1]),
         "pearson_coord_vs_source_angle": float(np.corrcoef(observed, source)[0, 1]),
         "coordinate_pair_order_inversions": pair_order_inversion_rate(
             source, observed, samples=inversion_samples, seed=seed
+        ),
+        "realised_stretch_by_source_decile": profile,
+        "near_decile_median_stretch": profile[0]["median"],
+        "near_decile_fraction_compressed": profile[0]["fraction_below_1"],
+        "nearest_5pct_fraction_compressed": nearest_fraction_compressed(
+            source, observed
+        ),
+        "all_pairs_fraction_compressed": float(np.mean(ratios < 1.0)),
+        "realised_stretch_monotone_across_deciles": bool(
+            all(
+                profile[i]["median"] <= profile[i + 1]["median"]
+                for i in range(len(profile) - 1)
+            )
         ),
         "angle_ratio": {
             "mean": float(np.mean(ratios)),
@@ -798,11 +1046,32 @@ def order_fidelity_metrics(
             "p90": float(np.percentile(ratios, 90)),
             "max": float(np.max(ratios)),
         },
-        "angle_stress": stress,
-        "normalised_angle_stress": math.sqrt(stress / denominator),
-        "angle_rmse_radians": math.sqrt(stress / target.size),
-        "pair_count": int(target.size),
+        "pair_count": int(source.size),
     }
+    if targets is None:
+        metrics["target_reference"] = None
+        for key in (
+            "spearman_coord_vs_target",
+            "pearson_coord_vs_target",
+            "angle_stress",
+            "normalised_angle_stress",
+            "angle_rmse_radians",
+        ):
+            metrics[key] = None
+        return metrics
+
+    target = upper_triangle(targets)
+    residual = observed - target
+    stress = float(np.sum(residual * residual))
+    metrics["target_reference"] = "own layout target"
+    metrics["spearman_coord_vs_target"] = float(spearmanr(observed, target).statistic)
+    metrics["pearson_coord_vs_target"] = float(np.corrcoef(observed, target)[0, 1])
+    metrics["angle_stress"] = stress
+    metrics["normalised_angle_stress"] = math.sqrt(
+        stress / float(np.sum(target * target))
+    )
+    metrics["angle_rmse_radians"] = math.sqrt(stress / target.size)
+    return metrics
 
 
 # ---------------------------------------------------------------------------
@@ -937,7 +1206,7 @@ class RefineConfig:
     """Deterministic refinement budget and constraint tolerances."""
 
     seed: int = DEFAULT_SEED
-    max_passes: int = 10
+    max_passes: int = 60
     pull_fractions: tuple[float, ...] = (0.25, 0.5, 0.75, 1.0)
     step_radii: tuple[float, ...] = (0.02, 0.05, 0.1, 0.2, 0.4)
     directions_per_radius: int = 3
@@ -945,6 +1214,11 @@ class RefineConfig:
     separation_max_relative_drop: float = 0.01
     #: Uniform-sphere KS may rise by at most this absolute amount.
     ks_max_absolute_increase: float = 0.005
+    #: Coverage guard: ``"ks"`` bounds the uniform-sphere KS, ``"mean_vector_norm"``
+    #: bounds the one-sidedness directly instead.
+    constraint_mode: str = "ks"
+    #: ``mean_vector_norm`` may rise by at most this absolute amount in that mode.
+    mean_vector_norm_max_absolute_increase: float = 0.005
 
 
 class _RecallState:
@@ -1037,8 +1311,12 @@ def refine_recall_constrained(
     Node visit order is ascending index (graph48 row order) and the candidate
     perturbations come from a single seeded generator, so the whole pass is
     deterministic. A move is accepted only when it strictly increases the total
-    top-5 hit count *and* keeps the cluster separation ratio and the
-    uniform-sphere KS statistic inside the configured tolerance.
+    top-5 hit count *and* keeps the cluster separation ratio and the configured
+    coverage guard inside tolerance. The guard is either the uniform-sphere KS
+    statistic (``constraint_mode="ks"``) or the layout's one-sidedness
+    (``constraint_mode="mean_vector_norm"``) — the refinement pulls neighbours
+    together, which makes a leaning layout lean further, so which quantity is
+    guarded changes what the refinement is allowed to spend.
     """
 
     n = coords.shape[0]
@@ -1047,18 +1325,22 @@ def refine_recall_constrained(
     state = _RecallState(coords, true_mask)
     rng = np.random.default_rng(config.seed)
 
+    if config.constraint_mode not in ("ks", "mean_vector_norm"):
+        raise ValueError(f"unknown constraint_mode {config.constraint_mode!r}")
     base_separation = separation_ratio(coords, labels)
     base_ks = ks_statistic_uniform_sphere(
         upper_triangle(coordinate_angle_matrix(coords))
     )
+    base_mean_norm = mean_vector_norm(coords)
     min_separation = base_separation * (1.0 - config.separation_max_relative_drop)
     max_ks = base_ks + config.ks_max_absolute_increase
+    max_mean_norm = base_mean_norm + config.mean_vector_norm_max_absolute_increase
 
     started = time.perf_counter()
     history: list[dict[str, object]] = []
     moved_nodes: set[int] = set()
     rejected_separation = 0
-    rejected_ks = 0
+    rejected_coverage = 0
     for sweep in range(config.max_passes):
         accepted = 0
         for v in range(n):
@@ -1085,11 +1367,17 @@ def refine_recall_constrained(
                     _, back = state.score_move(v, previous)
                     state.apply_move(v, previous, back)
                     continue
-                candidate_ks = ks_statistic_uniform_sphere(
-                    upper_triangle(coordinate_angle_matrix(state.coords))
-                )
-                if candidate_ks > max_ks:
-                    rejected_ks += 1
+                if config.constraint_mode == "ks":
+                    breached = (
+                        ks_statistic_uniform_sphere(
+                            upper_triangle(coordinate_angle_matrix(state.coords))
+                        )
+                        > max_ks
+                    )
+                else:
+                    breached = mean_vector_norm(state.coords) > max_mean_norm
+                if breached:
+                    rejected_coverage += 1
                     _, back = state.score_move(v, previous)
                     state.apply_move(v, previous, back)
                     continue
@@ -1116,15 +1404,24 @@ def refine_recall_constrained(
         "candidates_per_node": len(config.pull_fractions)
         + len(config.step_radii) * config.directions_per_radius,
         "constraints": {
+            "constraint_mode": config.constraint_mode,
             "separation_ratio_before": base_separation,
             "separation_ratio_floor": min_separation,
             "separation_max_relative_drop": config.separation_max_relative_drop,
             "pair_angle_ks_before": base_ks,
             "pair_angle_ks_ceiling": max_ks,
             "ks_max_absolute_increase": config.ks_max_absolute_increase,
+            "mean_vector_norm_before": base_mean_norm,
+            "mean_vector_norm_ceiling": max_mean_norm,
+            "mean_vector_norm_max_absolute_increase": (
+                config.mean_vector_norm_max_absolute_increase
+            ),
             "rejected_by_separation": rejected_separation,
-            "rejected_by_ks": rejected_ks,
-            "binding": rejected_separation + rejected_ks > 0,
+            "rejected_by_coverage_guard": rejected_coverage,
+            "rejected_by_ks": (
+                rejected_coverage if config.constraint_mode == "ks" else 0
+            ),
+            "binding": rejected_separation + rejected_coverage > 0,
         },
         "elapsed_seconds": time.perf_counter() - started,
     }
@@ -1285,7 +1582,6 @@ def build_public_json(
 @dataclass
 class Dataset:
     ids: list[int]
-    cosines: np.ndarray
     angles: np.ndarray
     pair_angles: np.ndarray
     ranks: np.ndarray
@@ -1298,9 +1594,13 @@ class Dataset:
 
 
 def evaluate_layout(
-    coords: np.ndarray, data: Dataset, targets: np.ndarray
+    coords: np.ndarray, data: Dataset, targets: np.ndarray | None = None
 ) -> dict[str, object]:
-    """A + B + C + cluster metrics for one coordinate set."""
+    """A + B + C + cluster metrics for one coordinate set.
+
+    ``targets`` is optional so that layouts which never aimed at a given target
+    do not get a meaningless stress number (see :func:`order_fidelity_metrics`).
+    """
 
     return {
         "coverage": coverage_metrics(coords, data.probes),
@@ -1314,7 +1614,65 @@ def evaluate_layout(
             data.union_pairs,
             data.union_cosines,
         ),
+        "degenerate_fallback_count": count_degenerate_rows(coords),
     }
+
+
+def gate_row(evaluation: dict[str, object]) -> dict[str, float]:
+    """Flatten the metrics a gate or floor can be evaluated against."""
+
+    coverage = evaluation["coverage"]
+    cluster = evaluation["cluster"]
+    order = evaluation["order_fidelity"]
+    topk = evaluation["topk"]
+    return {
+        "mean_recall_at_5": float(topk["mean_recall_at_5"]),
+        "hit_rate_at_5": float(topk["hit_rate_at_5"]),
+        "full_recovery_rate": float(topk["full_recovery_rate"]),
+        "bottom_decile_false_close_count": float(
+            topk["bottom_decile_false_close_count"]
+        ),
+        "union_edge_rmse_radians_original_acos": float(
+            topk["union_edge_rmse_radians_original_acos"]
+        ),
+        "unit_norm_max_error": float(topk["unit_norm_max_error"]),
+        "pair_angle_ks_vs_uniform_sphere": float(
+            coverage["pair_angle_ks_vs_uniform_sphere"]
+        ),
+        "covering_radius_radians": float(coverage["covering_radius_radians"]),
+        "empty_cells_100": float(
+            coverage["equal_area_cells"]["cells_100"]["empty_cells"]
+        ),
+        "mean_vector_norm": float(coverage["mean_vector_norm"]),
+        "best_hemisphere_fraction": float(coverage["best_hemisphere_fraction"]),
+        "pair_angle_median": float(coverage["pair_angle"]["median"]),
+        "near_decile_median_stretch": float(order["near_decile_median_stretch"]),
+        "nearest_5pct_fraction_compressed": float(
+            order["nearest_5pct_fraction_compressed"]
+        ),
+        "separation_ratio": float(cluster["separation_ratio"]),
+        "silhouette_mean": float(cluster["silhouette_mean"]),
+        "centroid_angle_min": float(cluster["centroid_angle_min"]),
+    }
+
+
+def check_thresholds(
+    row: dict[str, float], thresholds: dict[str, tuple[str, float]]
+) -> dict[str, object]:
+    """Evaluate ``{metric: (op, bound)}`` against a flattened metric row."""
+
+    checks: dict[str, object] = {}
+    for metric, (op, bound) in thresholds.items():
+        value = row[metric]
+        passed = value >= bound if op == ">=" else value <= bound
+        checks[metric] = {
+            "value": value,
+            "operator": op,
+            "threshold": bound,
+            "passed": bool(passed),
+        }
+    failed = [name for name, check in checks.items() if not check["passed"]]
+    return {"checks": checks, "passed": not failed, "failed": failed}
 
 
 def load_dataset(
@@ -1346,7 +1704,6 @@ def load_dataset(
     labels = np.asarray([label_map[node_id] for node_id in ids])
     data = Dataset(
         ids=ids,
-        cosines=cosines,
         angles=angles,
         pair_angles=upper_triangle(angles),
         ranks=ranks,
@@ -1536,12 +1893,18 @@ def run_linear_mode(args: argparse.Namespace) -> int:
 # ---------------------------------------------------------------------------
 
 CONVEX_SELECTION_RULE = (
-    "Borda rank sum over three pre-declared axes, lowest total wins: "
-    "(1) cluster separation ratio, higher is better; "
-    "(2) mean Recall@5, higher is better; "
-    "(3) coordinate pair-angle KS distance to the uniform sphere, lower is "
-    "better. Ties break on the lower KS. The same rule is used for the "
-    "preliminary shortlist and for the final recommendation."
+    "Two stages. STAGE 1 (filter, applied before any ranking): a candidate is "
+    "eliminated if the realised near-field decile median stretch of its "
+    "coordinates is below --min-near-decile-stretch, or if it misses any "
+    "non-regression floor in NON_REGRESSION_FLOORS, or if it misses a revised "
+    "hard acceptance gate in REVISED_ACCEPTANCE_GATES. Passing the analytic "
+    "contract is not enough — the filter is evaluated on realised coordinates. "
+    "STAGE 2 (rank the survivors): Borda rank sum over three axes, lowest total "
+    "wins: (1) cluster separation ratio, higher is better; (2) mean Recall@5, "
+    "higher is better; (3) coordinate pair-angle KS distance to the uniform "
+    "sphere, lower is better. Ties break on the lower KS. If no candidate "
+    "survives stage 1, nothing is selected: the run reports BLOCKED and emits "
+    "the frontier instead of forcing a pick."
 )
 
 
@@ -1557,17 +1920,64 @@ def borda_rank(rows: dict[str, dict[str, float]]) -> dict[str, float]:
     return totals
 
 
+def matched_treatment(
+    coords: np.ndarray,
+    data: Dataset,
+    true_top_k: np.ndarray,
+    refine_config: RefineConfig,
+    targets: np.ndarray | None = None,
+) -> dict[str, object]:
+    """Evaluate a layout before and after the *same* refinement every row gets.
+
+    The refinement optimises mean Recall@5 directly, so comparing a refined
+    layout with unrefined ones is not a like-for-like comparison. Every row in
+    the comparison table therefore receives an identical ``RefineConfig``.
+    """
+
+    before = evaluate_layout(coords, data, targets)
+    refined, report = refine_recall_constrained(
+        coords, true_top_k, data.labels, refine_config
+    )
+    after = evaluate_layout(refined, data, targets)
+    return {
+        "before_refinement": before,
+        "after_refinement": after,
+        "refinement": report,
+        "coordinates": refined,
+        "coordinates_before_refinement": coords,
+    }
+
+
+def _borda_axes(evaluation: dict[str, object]) -> dict[str, float]:
+    return {
+        "separation": float(evaluation["cluster"]["separation_ratio"]),
+        "recall": float(evaluation["topk"]["mean_recall_at_5"]),
+        "ks": float(evaluation["coverage"]["pair_angle_ks_vs_uniform_sphere"]),
+    }
+
+
 def run_convex_mode(args: argparse.Namespace) -> int:
     data, paths = load_dataset(args.artifact_dir, args.probe_points)
     n = len(data.ids)
     theta_max = float(np.max(data.pair_angles))
     true_top_k = data.order[:, :TOP_K]
+    near_gate = float(args.min_near_decile_stretch)
 
     grid = [(a, gamma) for a in SWEEP_A for gamma in SWEEP_GAMMA]
-    contracts = {
-        f"a{a}_g{gamma}": convex_contract_report(a, gamma, theta_max)
-        for a, gamma in grid
-    }
+    contracts: dict[str, dict] = {}
+    rejected_contracts: dict[str, dict] = {}
+    for a, gamma in grid:
+        name = f"a{a}_g{gamma}"
+        try:
+            contracts[name] = convex_contract_report(a, gamma, theta_max)
+        except ValueError as exc:
+            rejected_contracts[name] = {
+                "a": a,
+                "gamma": gamma,
+                "reason": str(exc),
+                "a_upper_bound": math.pi / theta_max,
+            }
+            print(f"rejected {name}: {exc}")
 
     preliminary_config = LayoutConfig(
         seed=args.seed,
@@ -1586,30 +1996,42 @@ def run_convex_mode(args: argparse.Namespace) -> int:
         ks_max_absolute_increase=args.ks_increase,
     )
 
+    source_pairs = data.pair_angles
     preliminary: dict[str, dict] = {}
     axes: dict[str, dict[str, float]] = {}
-    for a, gamma in grid:
-        name = f"a{a}_g{gamma}"
+    for name, contract in contracts.items():
+        a = contract["a"]
+        gamma = contract["gamma"]
         targets = convex_stretch(data.angles, a, gamma, theta_max)
         np.fill_diagonal(targets, 0.0)
         result = optimise_layout(targets, preliminary_config)
         coords = result.coordinates
         cluster = cluster_separation_metrics(coords, data.labels)
-        pair_angles = upper_triangle(coordinate_angle_matrix(coords))
-        ks = ks_statistic_uniform_sphere(pair_angles)
+        observed = upper_triangle(coordinate_angle_matrix(coords))
+        ks = ks_statistic_uniform_sphere(observed)
+        profile = realised_stretch_by_source_decile(source_pairs, observed)
+        near_median = float(profile[0]["median"])
+        nearest_compressed = nearest_fraction_compressed(source_pairs, observed)
         dots = np.clip(coords @ coords.T, -1.0, 1.0)
         _, coord_order = similarity_rank_matrix(dots, data.ids)
         recall = recall_metrics(true_top_k, coord_order[:, :TOP_K])
         preliminary[name] = {
             "a": a,
             "gamma": gamma,
-            "contract": contracts[name],
+            "contract": contract,
             "separation_ratio": cluster["separation_ratio"],
             "silhouette_mean": cluster["silhouette_mean"],
+            "centroid_angle_min": cluster["centroid_angle_min"],
             "pair_angle_ks_vs_uniform_sphere": ks,
             "covering_radius_radians": covering_radius(coords, data.probes),
+            "near_decile_median_stretch": near_median,
+            "nearest_5pct_fraction_compressed": nearest_compressed,
+            "near_field_gate": near_gate,
+            "near_field_gate_passed": bool(near_median >= near_gate),
+            "realised_stretch_by_source_decile": profile,
             **recall,
             "objective": min(result.start_objectives),
+            "degenerate_fallback_count": count_degenerate_rows(coords),
             "elapsed_seconds": result.elapsed_seconds,
         }
         axes[name] = {
@@ -1620,17 +2042,32 @@ def run_convex_mode(args: argparse.Namespace) -> int:
         print(
             f"prelim {name}: sep={cluster['separation_ratio']:.4f} "
             f"recall@5={recall['mean_recall_at_5']:.4f} ks={ks:.4f} "
+            f"near_stretch={near_median:.4f} "
+            f"near5%_compressed={nearest_compressed:.4f} "
+            f"gate={'pass' if near_median >= near_gate else 'FAIL'} "
             f"({result.elapsed_seconds:.1f}s)"
         )
 
-    totals = borda_rank(axes)
-    shortlist = sorted(totals, key=lambda name: (totals[name], axes[name]["ks"]))[
+    eligible = [
+        name for name in preliminary if preliminary[name]["near_field_gate_passed"]
+    ]
+    near_gate_eliminated_all = not eligible
+    pool = eligible or sorted(preliminary)
+    totals = borda_rank({name: axes[name] for name in pool})
+    shortlist = sorted(pool, key=lambda name: (totals[name], axes[name]["ks"]))[
         : args.shortlist
     ]
+    if near_gate_eliminated_all:
+        print(
+            "near-field gate eliminated every candidate; continuing with a "
+            "best-effort frontier shortlist (final status will be BLOCKED unless "
+            "the full runs clear the floors)"
+        )
     print(f"shortlist: {shortlist}")
 
     finalists: dict[str, dict] = {}
     coords_by_name: dict[str, np.ndarray] = {}
+    before_coords_by_name: dict[str, np.ndarray] = {}
     targets_by_name: dict[str, np.ndarray] = {}
     for name in shortlist:
         a = preliminary[name]["a"]
@@ -1638,13 +2075,14 @@ def run_convex_mode(args: argparse.Namespace) -> int:
         targets = convex_stretch(data.angles, a, gamma, theta_max)
         np.fill_diagonal(targets, 0.0)
         result = optimise_layout(targets, full_config)
-        before = evaluate_layout(result.coordinates, data, targets)
-        refined, refine_report = refine_recall_constrained(
-            result.coordinates, true_top_k, data.labels, refine_config
+        treated = matched_treatment(
+            result.coordinates, data, true_top_k, refine_config, targets
         )
-        after = evaluate_layout(refined, data, targets)
-        coords_by_name[name] = refined
+        after = treated["after_refinement"]
+        coords_by_name[name] = treated["coordinates"]
+        before_coords_by_name[name] = result.coordinates
         targets_by_name[name] = targets
+        row = gate_row(after)
         finalists[name] = {
             "a": a,
             "gamma": gamma,
@@ -1652,9 +2090,14 @@ def run_convex_mode(args: argparse.Namespace) -> int:
             "target_monotonicity_violations": target_monotonicity_violations(
                 data.pair_angles, upper_triangle(targets)
             ),
-            "before_refinement": before,
+            "before_refinement": treated["before_refinement"],
             "after_refinement": after,
-            "refinement": refine_report,
+            "refinement": treated["refinement"],
+            "gate_row": row,
+            "non_regression": check_thresholds(row, NON_REGRESSION_FLOORS),
+            "revised_gates": check_thresholds(row, REVISED_ACCEPTANCE_GATES),
+            "original_gates": check_thresholds(row, ORIGINAL_ACCEPTANCE_GATES),
+            "separation_targets": check_thresholds(row, SEPARATION_TARGETS),
             "multistart_objectives": result.start_objectives,
             "multistart_seeds": result.seeds,
             "multistart_start_kinds": result.start_kinds,
@@ -1663,35 +2106,51 @@ def run_convex_mode(args: argparse.Namespace) -> int:
             "elapsed_seconds": result.elapsed_seconds,
         }
         print(
-            f"final {name}: recall@5 {before['topk']['mean_recall_at_5']:.4f} -> "
-            f"{after['topk']['mean_recall_at_5']:.4f} sep "
-            f"{before['cluster']['separation_ratio']:.4f} -> "
-            f"{after['cluster']['separation_ratio']:.4f} ks "
-            f"{before['coverage']['pair_angle_ks_vs_uniform_sphere']:.4f} -> "
-            f"{after['coverage']['pair_angle_ks_vs_uniform_sphere']:.4f}"
+            f"final {name}: recall@5 "
+            f"{treated['before_refinement']['topk']['mean_recall_at_5']:.4f} -> "
+            f"{row['mean_recall_at_5']:.4f} sep {row['separation_ratio']:.4f} "
+            f"sil {row['silhouette_mean']:.4f} ks "
+            f"{row['pair_angle_ks_vs_uniform_sphere']:.4f} near "
+            f"{row['near_decile_median_stretch']:.4f} near5% "
+            f"{row['nearest_5pct_fraction_compressed']:.4f} floors "
+            f"{'PASS' if finalists[name]['non_regression']['passed'] else 'FAIL'} "
+            f"{finalists[name]['non_regression']['failed']}"
         )
 
+    qualified = [
+        name
+        for name in shortlist
+        if finalists[name]["non_regression"]["passed"]
+        and finalists[name]["revised_gates"]["passed"]
+    ]
     final_axes = {
+        name: _borda_axes(finalists[name]["after_refinement"]) for name in shortlist
+    }
+    final_totals = borda_rank(final_axes)
+    if qualified:
+        chosen = sorted(
+            {name: final_totals[name] for name in qualified},
+            key=lambda name: (final_totals[name], final_axes[name]["ks"]),
+        )[0]
+        status = "SELECTED"
+    else:
+        chosen = None
+        status = "BLOCKED"
+    frontier = {
         name: {
-            "separation": finalists[name]["after_refinement"]["cluster"][
-                "separation_ratio"
+            **finalists[name]["gate_row"],
+            "non_regression_failed": finalists[name]["non_regression"]["failed"],
+            "revised_gates_failed": finalists[name]["revised_gates"]["failed"],
+            "separation_targets_failed": finalists[name]["separation_targets"][
+                "failed"
             ],
-            "recall": finalists[name]["after_refinement"]["topk"]["mean_recall_at_5"],
-            "ks": finalists[name]["after_refinement"]["coverage"][
-                "pair_angle_ks_vs_uniform_sphere"
-            ],
+            "borda_total": final_totals[name],
         }
         for name in shortlist
     }
-    final_totals = borda_rank(final_axes)
-    chosen = sorted(
-        final_totals, key=lambda name: (final_totals[name], final_axes[name]["ks"])
-    )[0]
-    coords = coords_by_name[chosen]
-    chosen_targets = targets_by_name[chosen]
-    print(f"selected {chosen}")
+    print(f"status {status}; selected {chosen}")
 
-    # reference layouts, all scored with the same code
+    # reference layouts — identical code path and identical refinement budget
     linear_k = k_max_antipodal(data.pair_angles)
     linear_targets = scaled_targets(data.angles, linear_k)
     np.fill_diagonal(linear_targets, 0.0)
@@ -1703,127 +2162,243 @@ def run_convex_mode(args: argparse.Namespace) -> int:
     rankscaled_coords = coordinates_in_id_order(
         load_coordinates_csv(rankscaled_path), data.ids
     )
-    comparison = {
-        "baseline": evaluate_layout(baseline_coords, data, chosen_targets),
-        "rank_scaled": evaluate_layout(rankscaled_coords, data, chosen_targets),
-        "linear_ratio_k_max_antipodal": evaluate_layout(
-            linear_result.coordinates, data, linear_targets
+    reference_layouts = {
+        "baseline": (baseline_coords, None, str(paths["baseline"])),
+        "rank_scaled": (rankscaled_coords, None, str(rankscaled_path)),
+        "linear_k_max_antipodal": (
+            linear_result.coordinates,
+            linear_targets,
+            "persisted by this run",
         ),
-        "convex_before_refinement": finalists[chosen]["before_refinement"],
-        "convex_after_refinement": finalists[chosen]["after_refinement"],
     }
-    comparison["linear_ratio_k_max_antipodal"]["k"] = linear_k
+    linear_v1_path = DEFAULT_LINEAR_OUTPUT_DIR / "coordinates.csv"
+    if linear_v1_path.exists():
+        reference_layouts["linear_v1_on_disk_k_median_match"] = (
+            coordinates_in_id_order(load_coordinates_csv(linear_v1_path), data.ids),
+            None,
+            str(linear_v1_path),
+        )
+
+    comparison: dict[str, dict] = {}
+    comparison_coords: dict[str, tuple[np.ndarray, np.ndarray]] = {}
+    for label, (layout, targets, source) in reference_layouts.items():
+        treated = matched_treatment(layout, data, true_top_k, refine_config, targets)
+        comparison[label] = {
+            "source": source,
+            "before_refinement": treated["before_refinement"],
+            "after_refinement": treated["after_refinement"],
+            "refinement": treated["refinement"],
+            "gate_row_before": gate_row(treated["before_refinement"]),
+            "gate_row_after": gate_row(treated["after_refinement"]),
+        }
+        comparison_coords[label] = (layout, treated["coordinates"])
+        print(
+            f"matched {label}: recall@5 "
+            f"{comparison[label]['gate_row_before']['mean_recall_at_5']:.4f} -> "
+            f"{comparison[label]['gate_row_after']['mean_recall_at_5']:.4f}"
+        )
+    comparison["linear_k_max_antipodal"]["k"] = linear_k
+    for name in shortlist:
+        comparison[f"convex_{name}"] = {
+            "source": "this run",
+            "before_refinement": finalists[name]["before_refinement"],
+            "after_refinement": finalists[name]["after_refinement"],
+            "refinement": finalists[name]["refinement"],
+            "gate_row_before": gate_row(finalists[name]["before_refinement"]),
+            "gate_row_after": finalists[name]["gate_row"],
+        }
 
     reference = uniform_reference(
         n, data.probes, replicates=args.uniform_replicates, seed=args.seed
     )
 
     if args.no_write:
-        print(json.dumps(final_axes, indent=2, sort_keys=True))
+        print(json.dumps(frontier, indent=2, sort_keys=True, default=str))
         return 0
 
     out_dir: Path = args.output_dir or DEFAULT_CONVEX_OUTPUT_DIR
     out_dir.mkdir(parents=True, exist_ok=True)
-    coordinates_path = out_dir / "coordinates.csv"
-    write_coordinates_csv(coordinates_path, data.ids, coords)
+    written: dict[str, Path] = {}
+    for label, (raw, refined) in comparison_coords.items():
+        path = out_dir / f"{label.replace('_', '-')}-coordinates.csv"
+        write_coordinates_csv(path, data.ids, raw)
+        written[path.name] = path
+        refined_path = out_dir / f"{label.replace('_', '-')}-coordinates-refined.csv"
+        write_coordinates_csv(refined_path, data.ids, refined)
+        written[refined_path.name] = refined_path
+    for name in shortlist:
+        path = out_dir / f"coordinates-{name}-before-refinement.csv"
+        write_coordinates_csv(path, data.ids, before_coords_by_name[name])
+        written[path.name] = path
+        path = out_dir / f"coordinates-{name}-after-refinement.csv"
+        write_coordinates_csv(path, data.ids, coords_by_name[name])
+        written[path.name] = path
 
-    layout_report = {
-        "algorithm": "convex_monotone_stretch_spherical_stress_v1",
-        "mode": "convex",
-        "selected_combination": chosen,
-        "a": finalists[chosen]["a"],
-        "gamma": finalists[chosen]["gamma"],
-        "b": contracts[chosen]["b"],
-        "theta_max": theta_max,
-        "edge_target_policy": (
-            "theta_target(i,j) = a*angle + b*angle**gamma with "
-            "b = (pi - a*theta_max)/theta_max**gamma, applied to all C(602,2) "
-            "pairs; strictly increasing, convex, f(theta) > theta everywhere, "
-            "f(theta_max) = pi"
+    sources = {
+        "baseline": str(paths["baseline"]),
+        "rank_scaled": str(rankscaled_path),
+        "linear_k_max_antipodal": str(
+            out_dir / "linear-k-max-antipodal-coordinates.csv"
         ),
-        "objective": (
-            "sum over all 180901 unordered pairs of "
-            "(theta_coord - theta_target)^2, uniform weight 1.0 per pair, "
-            "followed by a constrained greedy refinement on mean Recall@5"
-        ),
-        "contract": contracts[chosen],
-        "target_monotonicity_violations": finalists[chosen][
-            "target_monotonicity_violations"
-        ],
-        "seed": full_config.seed,
-        "multistart_count": full_config.multistart_count,
-        "multistart_seeds": finalists[chosen]["multistart_seeds"],
-        "multistart_objectives": finalists[chosen]["multistart_objectives"],
-        "multistart_iterations": finalists[chosen]["multistart_iterations"],
-        "selected_start": finalists[chosen]["selected_start"],
-        "refinement": finalists[chosen]["refinement"],
-        "cluster_policy": data.cluster_policy,
-        "coordinate_sha256": coordinate_digest(data.ids, coords),
-        **finalists[chosen]["after_refinement"],
     }
-    with paths["baseline"].open() as handle:
-        baseline_payload = json.load(handle)
-    public = build_public_json(baseline_payload, data.ids, coords, layout_report)
-    public_path = out_dir / "spherical-graph-public.json"
-    with public_path.open("w") as handle:
-        json.dump(public, handle, indent=2, sort_keys=True)
+    if linear_v1_path.exists():
+        sources["linear_v1_on_disk_k_median_match"] = str(linear_v1_path)
 
+    public_path = None
+    coordinates_path = None
+    if chosen is not None:
+        coordinates_path = out_dir / "coordinates.csv"
+        write_coordinates_csv(coordinates_path, data.ids, coords_by_name[chosen])
+        written[coordinates_path.name] = coordinates_path
+        before_path = out_dir / "coordinates-before-refinement.csv"
+        write_coordinates_csv(before_path, data.ids, before_coords_by_name[chosen])
+        written[before_path.name] = before_path
+        layout_report = {
+            "algorithm": "convex_monotone_stretch_spherical_stress_v2",
+            "mode": "convex",
+            "status": status,
+            "selected_combination": chosen,
+            "a": finalists[chosen]["a"],
+            "gamma": finalists[chosen]["gamma"],
+            "b": contracts[chosen]["b"],
+            "theta_max": theta_max,
+            "edge_target_policy": (
+                "theta_target(i,j) = a*angle + b*angle**gamma with "
+                "b = (pi - a*theta_max)/theta_max**gamma, applied to all "
+                "C(602,2) pairs; strictly increasing, convex, f(theta) > theta "
+                "everywhere, f(theta_max) = pi"
+            ),
+            "objective": (
+                "sum over all 180901 unordered pairs of "
+                "(theta_coord - theta_target)^2, uniform weight 1.0 per pair, "
+                "followed by a constrained greedy refinement on mean Recall@5"
+            ),
+            "contract": contracts[chosen],
+            "target_monotonicity_violations": finalists[chosen][
+                "target_monotonicity_violations"
+            ],
+            "seed": full_config.seed,
+            "multistart_count": full_config.multistart_count,
+            "multistart_seeds": finalists[chosen]["multistart_seeds"],
+            "multistart_objectives": finalists[chosen]["multistart_objectives"],
+            "multistart_iterations": finalists[chosen]["multistart_iterations"],
+            "selected_start": finalists[chosen]["selected_start"],
+            "refinement": finalists[chosen]["refinement"],
+            "non_regression": finalists[chosen]["non_regression"],
+            "revised_gates": finalists[chosen]["revised_gates"],
+            "original_gates": finalists[chosen]["original_gates"],
+            "separation_targets": finalists[chosen]["separation_targets"],
+            "cluster_policy": data.cluster_policy,
+            "coordinate_sha256": coordinate_digest(data.ids, coords_by_name[chosen]),
+            **finalists[chosen]["after_refinement"],
+        }
+        with paths["baseline"].open() as handle:
+            baseline_payload = json.load(handle)
+        public = build_public_json(
+            baseline_payload, data.ids, coords_by_name[chosen], layout_report
+        )
+        public_path = out_dir / "spherical-graph-public.json"
+        with public_path.open("w") as handle:
+            json.dump(public, handle, indent=2, sort_keys=True)
+        written[public_path.name] = public_path
+
+    procedure = (
+        f"contract check on all {len(grid)} (a, gamma) combinations "
+        f"({len(rejected_contracts)} rejected for a >= pi/theta_max), "
+        f"preliminary sweep of the {len(contracts)} accepted ones with "
+        f"{args.preliminary_starts} starts and {args.preliminary_iterations} "
+        f"L-BFGS-B iterations, near-field filter at {near_gate}, then the top "
+        f"{args.shortlist} by the selection rule rerun with {args.starts} starts "
+        f"and {args.max_iterations} iterations plus the constrained recall "
+        "refinement; every comparison row receives the identical refinement"
+    )
+    sweep_payload = {
+        "grid": {"a": list(SWEEP_A), "gamma": list(SWEEP_GAMMA)},
+        "procedure": procedure,
+        "selection_rule": CONVEX_SELECTION_RULE,
+        "status": status,
+        "contracts": contracts,
+        "rejected_contracts": rejected_contracts,
+        "preliminary": preliminary,
+        "preliminary_borda_totals": totals,
+        "near_field_gate": near_gate,
+        "near_field_gate_eliminated_all": near_gate_eliminated_all,
+        "shortlist": shortlist,
+        "finalists": finalists,
+        "final_borda_totals": final_totals,
+        "frontier": frontier,
+        "qualified": qualified,
+        "selected_combination": chosen,
+        "thresholds": {
+            "original_acceptance_gates": ORIGINAL_ACCEPTANCE_GATES,
+            "revised_acceptance_gates": REVISED_ACCEPTANCE_GATES,
+            "non_regression_floors": NON_REGRESSION_FLOORS,
+            "separation_targets": SEPARATION_TARGETS,
+        },
+        "database_reads": 0,
+        "database_writes": 0,
+        "network_calls": 0,
+    }
     sweep_path = out_dir / "sweep-metrics.json"
     with sweep_path.open("w") as handle:
+        json.dump(sweep_payload, handle, indent=2, sort_keys=True, default=str)
+    written[sweep_path.name] = sweep_path
+
+    frontier_path = out_dir / "frontier.json"
+    with frontier_path.open("w") as handle:
         json.dump(
             {
-                "grid": {"a": list(SWEEP_A), "gamma": list(SWEEP_GAMMA)},
-                "procedure": (
-                    f"preliminary sweep of all {len(grid)} combinations with "
-                    f"{args.preliminary_starts} starts and "
-                    f"{args.preliminary_iterations} L-BFGS-B iterations, then "
-                    f"the top {args.shortlist} by the selection rule rerun with "
-                    f"{args.starts} starts and {args.max_iterations} iterations "
-                    "plus the constrained recall refinement"
-                ),
-                "selection_rule": CONVEX_SELECTION_RULE,
-                "contracts": contracts,
-                "preliminary": preliminary,
-                "preliminary_borda_totals": totals,
-                "shortlist": shortlist,
-                "finalists": finalists,
-                "final_borda_totals": final_totals,
+                "status": status,
                 "selected_combination": chosen,
-                "database_reads": 0,
-                "database_writes": 0,
-                "network_calls": 0,
+                "frontier": frontier,
+                "thresholds": {
+                    "non_regression_floors": NON_REGRESSION_FLOORS,
+                    "revised_acceptance_gates": REVISED_ACCEPTANCE_GATES,
+                    "separation_targets": SEPARATION_TARGETS,
+                    "near_field_gate": near_gate,
+                },
             },
             handle,
             indent=2,
             sort_keys=True,
             default=str,
         )
+    written[frontier_path.name] = frontier_path
 
     payload = {
         "mode": "convex",
+        "status": status,
         "node_count": n,
         "pair_count": int(data.pair_angles.size),
         "theta_max": theta_max,
         "a_upper_bound": math.pi / theta_max,
         "selected_combination": chosen,
-        "selected_a": finalists[chosen]["a"],
-        "selected_gamma": finalists[chosen]["gamma"],
-        "selected_b": contracts[chosen]["b"],
+        "selected_a": finalists[chosen]["a"] if chosen else None,
+        "selected_gamma": finalists[chosen]["gamma"] if chosen else None,
+        "selected_b": contracts[chosen]["b"] if chosen else None,
         "selection_rule": CONVEX_SELECTION_RULE,
+        "procedure": procedure,
         "contracts": contracts,
+        "rejected_contracts": rejected_contracts,
         "preliminary": preliminary,
         "preliminary_borda_totals": totals,
+        "near_field_gate": near_gate,
+        "near_field_gate_eliminated_all": near_gate_eliminated_all,
         "shortlist": shortlist,
         "finalists": finalists,
         "final_borda_totals": final_totals,
+        "frontier": frontier,
+        "qualified": qualified,
         "comparison": comparison,
         "uniform_sphere_reference": reference,
         "cluster_policy": data.cluster_policy,
         "source_angle_summary": angle_summary(data.pair_angles),
-        "sources": {
-            "baseline": str(paths["baseline"]),
-            "rank_scaled": str(rankscaled_path),
-            "linear_ratio": str(DEFAULT_LINEAR_OUTPUT_DIR / "coordinates.csv"),
+        "sources": sources,
+        "thresholds": {
+            "original_acceptance_gates": ORIGINAL_ACCEPTANCE_GATES,
+            "revised_acceptance_gates": REVISED_ACCEPTANCE_GATES,
+            "non_regression_floors": NON_REGRESSION_FLOORS,
+            "separation_targets": SEPARATION_TARGETS,
         },
         "config": {
             "seed": full_config.seed,
@@ -1832,6 +2407,7 @@ def run_convex_mode(args: argparse.Namespace) -> int:
             "preliminary_starts": args.preliminary_starts,
             "preliminary_iterations": args.preliminary_iterations,
             "shortlist": args.shortlist,
+            "min_near_decile_stretch": near_gate,
             "ftol": full_config.ftol,
             "gtol": full_config.gtol,
             "dot_clip": DOT_CLIP,
@@ -1853,13 +2429,18 @@ def run_convex_mode(args: argparse.Namespace) -> int:
         "input_file_sha256": {
             **{key: sha256_file(path) for key, path in paths.items()},
             "rankscaled-coordinates.csv": sha256_file(rankscaled_path),
+            **(
+                {"linear-v1-coordinates.csv": sha256_file(linear_v1_path)}
+                if linear_v1_path.exists()
+                else {}
+            ),
         },
         "output_file_sha256": {
-            "coordinates.csv": sha256_file(coordinates_path),
-            "spherical-graph-public.json": sha256_file(public_path),
-            "sweep-metrics.json": sha256_file(sweep_path),
+            name: sha256_file(path) for name, path in sorted(written.items())
         },
-        "coordinate_sha256": coordinate_digest(data.ids, coords),
+        "coordinate_sha256": (
+            coordinate_digest(data.ids, coords_by_name[chosen]) if chosen else None
+        ),
         "database_reads": 0,
         "database_writes": 0,
         "network_calls": 0,
@@ -1867,10 +2448,411 @@ def run_convex_mode(args: argparse.Namespace) -> int:
     metrics_path = out_dir / "layout-metrics.json"
     with metrics_path.open("w") as handle:
         json.dump(payload, handle, indent=2, sort_keys=True, default=str)
-    print(f"wrote {coordinates_path}")
+    for name in sorted(written):
+        print(f"wrote {written[name]}")
     print(f"wrote {metrics_path}")
-    print(f"wrote {public_path}")
-    print(f"wrote {sweep_path}")
+
+    if chosen is not None and args.durable_copy_dir is not None:
+        durable: Path = args.durable_copy_dir
+        durable.mkdir(parents=True, exist_ok=True)
+        for path in (coordinates_path, public_path, sweep_path, metrics_path):
+            if path is not None:
+                shutil.copyfile(path, durable / path.name)
+                print(f"copied {path.name} -> {durable}")
+    elif chosen is None:
+        print(
+            "BLOCKED: no candidate cleared the non-regression floors; "
+            "no canonical coordinates.csv and no durable copy were written"
+        )
+    return 0
+
+
+# ---------------------------------------------------------------------------
+# frontier mode driver
+# ---------------------------------------------------------------------------
+
+FRONTIER_RULE = (
+    "The frontier is the deliverable, not a single winner. Every experiment "
+    "point is computed and reported; the non-regression numbers are reference "
+    "lines, not filters. Only three things are hard: unit_norm_max_error <= "
+    "1e-12, zero target rank inversions, and the user's near-field requirement "
+    "(near-decile median realised stretch >= 1.00 and nearest-5% compressed "
+    "fraction <= 0.20). Points failing a hard gate stay in the table, flagged."
+)
+
+FRONTIER_A: tuple[float, ...] = (1.4, 1.6, 1.8, 2.0, 2.1)
+FRONTIER_GAMMA: tuple[float, ...] = (1.5, 2.0)
+FRONTIER_SCALES: tuple[float, ...] = (1.15, 1.3, 1.5, 1.75, 2.0)
+FRONTIER_SCALE_BASE: tuple[float, float] = (2.0, 1.5)
+FRONTIER_CENTERING_BASE: tuple[float, float] = (2.0, 1.5)
+#: Combined levers: global scale together with the centering penalty.
+FRONTIER_COMBINED_SCALES: tuple[float, ...] = (1.3, 1.5)
+FRONTIER_COMBINED_CENTERING: tuple[float, ...] = (400000.0,)
+
+#: Hard gates. Everything else is a reference line in this mode.
+HARD_GATES: dict[str, tuple[str, float]] = {
+    "unit_norm_max_error": ("<=", 1e-12),
+    "near_decile_median_stretch": (">=", 1.00),
+    "nearest_5pct_fraction_compressed": ("<=", 0.20),
+}
+
+
+def build_frontier_specs(
+    data: Dataset, theta_max: float, centering_weights: Sequence[float]
+) -> tuple[list[dict], dict[str, dict]]:
+    """All experiment points: convex grid, global scales, rank-area, centering."""
+
+    specs: list[dict] = []
+    rejected: dict[str, dict] = {}
+    for a in FRONTIER_A:
+        for gamma in FRONTIER_GAMMA:
+            label = f"convex-a{a}-g{gamma}"
+            try:
+                contract = convex_contract_report(a, gamma, theta_max)
+            except ValueError as exc:
+                rejected[label] = {
+                    "a": a,
+                    "gamma": gamma,
+                    "reason": str(exc),
+                    "a_upper_bound": math.pi / theta_max,
+                }
+                print(f"rejected {label}: {exc}")
+                continue
+            targets = convex_stretch(data.angles, a, gamma, theta_max)
+            np.fill_diagonal(targets, 0.0)
+            specs.append(
+                {
+                    "label": label,
+                    "family": "convex",
+                    "a": a,
+                    "gamma": gamma,
+                    "scale": 1.0,
+                    "centering_weight": 0.0,
+                    "contract": contract,
+                    "targets": targets,
+                    "clamp": scale_clamp_report(targets, 1.0),
+                }
+            )
+
+    base_a, base_gamma = FRONTIER_SCALE_BASE
+    base_targets = convex_stretch(data.angles, base_a, base_gamma, theta_max)
+    np.fill_diagonal(base_targets, 0.0)
+    for scale in FRONTIER_SCALES:
+        scaled = globally_scaled_targets(base_targets, scale)
+        np.fill_diagonal(scaled, 0.0)
+        specs.append(
+            {
+                "label": f"convex-a{base_a}-g{base_gamma}-s{scale}",
+                "family": "convex_global_scale",
+                "a": base_a,
+                "gamma": base_gamma,
+                "scale": scale,
+                "centering_weight": 0.0,
+                "contract": convex_contract_report(base_a, base_gamma, theta_max),
+                "targets": scaled,
+                "clamp": scale_clamp_report(base_targets, scale),
+            }
+        )
+
+    rank_targets = rank_uniform_area_targets(data.ranks)
+    specs.append(
+        {
+            "label": "rank-uniform-area",
+            "family": "rank_uniform_area",
+            "a": None,
+            "gamma": None,
+            "scale": 1.0,
+            "centering_weight": 0.0,
+            "contract": None,
+            "targets": rank_targets,
+            "clamp": scale_clamp_report(rank_targets, 1.0),
+        }
+    )
+
+    for scale in FRONTIER_COMBINED_SCALES:
+        for weight in FRONTIER_COMBINED_CENTERING:
+            scaled = globally_scaled_targets(base_targets, scale)
+            np.fill_diagonal(scaled, 0.0)
+            specs.append(
+                {
+                    "label": f"convex-a{base_a}-g{base_gamma}-s{scale}-centering{weight:g}",
+                    "family": "convex_scale_plus_centering",
+                    "a": base_a,
+                    "gamma": base_gamma,
+                    "scale": scale,
+                    "centering_weight": float(weight),
+                    "contract": convex_contract_report(base_a, base_gamma, theta_max),
+                    "targets": scaled,
+                    "clamp": scale_clamp_report(base_targets, scale),
+                }
+            )
+
+    centre_a, centre_gamma = FRONTIER_CENTERING_BASE
+    centre_targets = convex_stretch(data.angles, centre_a, centre_gamma, theta_max)
+    np.fill_diagonal(centre_targets, 0.0)
+    for weight in centering_weights:
+        specs.append(
+            {
+                "label": f"convex-a{centre_a}-g{centre_gamma}-centering{weight:g}",
+                "family": "convex_centering_penalty",
+                "a": centre_a,
+                "gamma": centre_gamma,
+                "scale": 1.0,
+                "centering_weight": float(weight),
+                "contract": convex_contract_report(centre_a, centre_gamma, theta_max),
+                "targets": centre_targets,
+                "clamp": scale_clamp_report(centre_targets, 1.0),
+            }
+        )
+    return specs, rejected
+
+
+def _frontier_row(
+    label: str,
+    spec: dict | None,
+    treated: dict,
+    monotonicity_violations: int | None,
+) -> dict[str, object]:
+    before = gate_row(treated["before_refinement"])
+    after = gate_row(treated["after_refinement"])
+    hard = check_thresholds(after, HARD_GATES)
+    hard_before = check_thresholds(before, HARD_GATES)
+    return {
+        "label": label,
+        "family": spec["family"] if spec else "reference_layout",
+        "a": spec["a"] if spec else None,
+        "gamma": spec["gamma"] if spec else None,
+        "scale": spec["scale"] if spec else None,
+        "centering_weight": spec["centering_weight"] if spec else None,
+        "clamped_pair_count": (spec["clamp"]["clamped_pair_count"] if spec else None),
+        "clamped_pair_fraction": (
+            spec["clamp"]["clamped_pair_fraction"] if spec else None
+        ),
+        "target_monotonicity_violations": monotonicity_violations,
+        "before_refinement": before,
+        "after_refinement": after,
+        "hard_gates_after": hard,
+        "hard_gates_before": hard_before,
+        "reference_lines_after": check_thresholds(after, NON_REGRESSION_FLOORS),
+        "separation_targets_after": check_thresholds(after, SEPARATION_TARGETS),
+        "refinement": treated["refinement"],
+    }
+
+
+def run_frontier_mode(args: argparse.Namespace) -> int:
+    data, paths = load_dataset(args.artifact_dir, args.probe_points)
+    n = len(data.ids)
+    theta_max = float(np.max(data.pair_angles))
+    true_top_k = data.order[:, :TOP_K]
+    layout_config = LayoutConfig(
+        seed=args.seed,
+        multistart_count=args.frontier_starts,
+        max_iterations=args.max_iterations,
+    )
+    refine_config = RefineConfig(
+        seed=args.seed,
+        max_passes=args.refine_passes,
+        separation_max_relative_drop=args.separation_drop,
+        ks_max_absolute_increase=args.ks_increase,
+    )
+    meannorm_refine_config = RefineConfig(
+        seed=args.seed,
+        max_passes=args.refine_passes,
+        separation_max_relative_drop=args.separation_drop,
+        constraint_mode="mean_vector_norm",
+        mean_vector_norm_max_absolute_increase=args.mean_norm_increase,
+    )
+
+    specs, rejected = build_frontier_specs(data, theta_max, args.centering_weights)
+    rows: dict[str, dict] = {}
+    coords_by_label: dict[str, tuple[np.ndarray, np.ndarray]] = {}
+    optimisation: dict[str, dict] = {}
+
+    for spec in specs:
+        label = spec["label"]
+        result = optimise_layout(
+            spec["targets"], layout_config, spec["centering_weight"]
+        )
+        treated = matched_treatment(
+            result.coordinates, data, true_top_k, refine_config, spec["targets"]
+        )
+        violations = target_monotonicity_violations(
+            data.pair_angles, upper_triangle(spec["targets"])
+        )
+        rows[label] = _frontier_row(label, spec, treated, violations)
+        coords_by_label[label] = (result.coordinates, treated["coordinates"])
+        optimisation[label] = {
+            "multistart_objectives": result.start_objectives,
+            "multistart_seeds": result.seeds,
+            "multistart_iterations": result.iterations,
+            "selected_start": result.selected_start,
+            "elapsed_seconds": result.elapsed_seconds,
+            "degenerate_fallback_count": count_degenerate_rows(result.coordinates),
+        }
+        row = rows[label]
+        print(
+            f"{label}: bias {row['before_refinement']['mean_vector_norm']:.4f}->"
+            f"{row['after_refinement']['mean_vector_norm']:.4f} "
+            f"hemi {row['after_refinement']['best_hemisphere_fraction']:.3f} "
+            f"cover {row['after_refinement']['covering_radius_radians']:.4f} "
+            f"empty {row['after_refinement']['empty_cells_100']:.0f} "
+            f"ks {row['after_refinement']['pair_angle_ks_vs_uniform_sphere']:.4f} "
+            f"recall {row['before_refinement']['mean_recall_at_5']:.4f}->"
+            f"{row['after_refinement']['mean_recall_at_5']:.4f} "
+            f"near {row['after_refinement']['near_decile_median_stretch']:.4f}/"
+            f"{row['after_refinement']['nearest_5pct_fraction_compressed']:.4f} "
+            f"hard {'PASS' if row['hard_gates_after']['passed'] else row['hard_gates_after']['failed']}"
+        )
+
+    # alternative refinement guard on the scale base point
+    base_label = f"convex-a{FRONTIER_SCALE_BASE[0]}-g{FRONTIER_SCALE_BASE[1]}"
+    if base_label in coords_by_label:
+        spec = next(item for item in specs if item["label"] == base_label)
+        alt_label = f"{base_label}-refine-meannorm"
+        treated = matched_treatment(
+            coords_by_label[base_label][0],
+            data,
+            true_top_k,
+            meannorm_refine_config,
+            spec["targets"],
+        )
+        rows[alt_label] = _frontier_row(
+            alt_label,
+            {**spec, "family": "convex_refine_meannorm_guard"},
+            treated,
+            rows[base_label]["target_monotonicity_violations"],
+        )
+        coords_by_label[alt_label] = (
+            coords_by_label[base_label][0],
+            treated["coordinates"],
+        )
+        print(
+            f"{alt_label}: bias "
+            f"{rows[alt_label]['after_refinement']['mean_vector_norm']:.4f} "
+            f"recall {rows[alt_label]['after_refinement']['mean_recall_at_5']:.4f} "
+            f"(KS guard gave "
+            f"{rows[base_label]['after_refinement']['mean_vector_norm']:.4f} / "
+            f"{rows[base_label]['after_refinement']['mean_recall_at_5']:.4f})"
+        )
+
+    # existing layouts folded in as frontier points, same matched treatment
+    references: dict[str, tuple[np.ndarray, str]] = {}
+    references["baseline"] = (
+        coordinates_in_id_order(
+            load_public_json_coordinates(paths["baseline"]), data.ids
+        ),
+        str(paths["baseline"]),
+    )
+    rankscaled_path = args.rankscaled_dir / "coordinates.csv"
+    references["rank-scaled"] = (
+        coordinates_in_id_order(load_coordinates_csv(rankscaled_path), data.ids),
+        str(rankscaled_path),
+    )
+    linear_v1 = DEFAULT_LINEAR_OUTPUT_DIR / "coordinates.csv"
+    if linear_v1.exists():
+        references["linear-ratio-v1"] = (
+            coordinates_in_id_order(load_coordinates_csv(linear_v1), data.ids),
+            str(linear_v1),
+        )
+    convex_v1 = Path("/private/tmp/cocktail-mate-s2-convex-602-v1/coordinates.csv")
+    if convex_v1.exists():
+        references["convex-v1-a1.4-g1.5"] = (
+            coordinates_in_id_order(load_coordinates_csv(convex_v1), data.ids),
+            str(convex_v1),
+        )
+    reference_sources = {label: source for label, (_, source) in references.items()}
+    for label, (layout, _) in references.items():
+        treated = matched_treatment(layout, data, true_top_k, refine_config, None)
+        rows[label] = _frontier_row(label, None, treated, None)
+        coords_by_label[label] = (layout, treated["coordinates"])
+        row = rows[label]
+        print(
+            f"{label}: bias {row['before_refinement']['mean_vector_norm']:.4f}->"
+            f"{row['after_refinement']['mean_vector_norm']:.4f} "
+            f"recall {row['before_refinement']['mean_recall_at_5']:.4f}->"
+            f"{row['after_refinement']['mean_recall_at_5']:.4f}"
+        )
+
+    reference_uniform = uniform_reference(
+        n, data.probes, replicates=args.uniform_replicates, seed=args.seed
+    )
+
+    if args.no_write:
+        return 0
+
+    out_dir: Path = args.output_dir or DEFAULT_CONVEX_OUTPUT_DIR
+    out_dir.mkdir(parents=True, exist_ok=True)
+    written: dict[str, Path] = {}
+    for label, (raw, refined) in coords_by_label.items():
+        path = out_dir / f"coordinates-{label}.csv"
+        write_coordinates_csv(path, data.ids, refined)
+        written[path.name] = path
+        raw_path = out_dir / f"coordinates-{label}-unrefined.csv"
+        write_coordinates_csv(raw_path, data.ids, raw)
+        written[raw_path.name] = raw_path
+
+    payload = {
+        "mode": "frontier",
+        "rule": FRONTIER_RULE,
+        "node_count": n,
+        "pair_count": int(data.pair_angles.size),
+        "theta_max": theta_max,
+        "a_upper_bound": math.pi / theta_max,
+        "grid": {
+            "a": list(FRONTIER_A),
+            "gamma": list(FRONTIER_GAMMA),
+            "global_scales": list(FRONTIER_SCALES),
+            "global_scale_base": list(FRONTIER_SCALE_BASE),
+            "centering_weights": list(args.centering_weights),
+            "centering_base": list(FRONTIER_CENTERING_BASE),
+        },
+        "rejected_contracts": rejected,
+        "frontier": rows,
+        "optimisation": optimisation,
+        "reference_sources": reference_sources,
+        "uniform_sphere_reference": reference_uniform,
+        "cluster_policy": data.cluster_policy,
+        "thresholds": {
+            "hard_gates": HARD_GATES,
+            "reference_lines": NON_REGRESSION_FLOORS,
+            "separation_targets": SEPARATION_TARGETS,
+            "original_acceptance_gates": ORIGINAL_ACCEPTANCE_GATES,
+            "revised_acceptance_gates": REVISED_ACCEPTANCE_GATES,
+        },
+        "config": {
+            "seed": layout_config.seed,
+            "multistart_count": layout_config.multistart_count,
+            "max_iterations": layout_config.max_iterations,
+            "probe_points": int(args.probe_points),
+            "uniform_replicates": int(args.uniform_replicates),
+            "refinement": {
+                "seed": refine_config.seed,
+                "max_passes": refine_config.max_passes,
+                "constraint_mode": refine_config.constraint_mode,
+                "separation_max_relative_drop": (
+                    refine_config.separation_max_relative_drop
+                ),
+                "ks_max_absolute_increase": refine_config.ks_max_absolute_increase,
+                "mean_vector_norm_max_absolute_increase": (
+                    meannorm_refine_config.mean_vector_norm_max_absolute_increase
+                ),
+            },
+        },
+        "input_file_sha256": {
+            **{key: sha256_file(path) for key, path in paths.items()},
+            "rankscaled-coordinates.csv": sha256_file(rankscaled_path),
+        },
+        "output_file_sha256": {
+            name: sha256_file(path) for name, path in sorted(written.items())
+        },
+        "database_reads": 0,
+        "database_writes": 0,
+        "network_calls": 0,
+    }
+    metrics_path = out_dir / "frontier-metrics.json"
+    with metrics_path.open("w") as handle:
+        json.dump(payload, handle, indent=2, sort_keys=True, default=str)
+    print(f"wrote {metrics_path} and {len(written)} coordinate files")
     return 0
 
 
@@ -1881,7 +2863,9 @@ def run_convex_mode(args: argparse.Namespace) -> int:
 
 def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--mode", choices=("convex", "linear"), default="convex")
+    parser.add_argument(
+        "--mode", choices=("convex", "linear", "frontier"), default="frontier"
+    )
     parser.add_argument("--artifact-dir", type=Path, default=DEFAULT_ARTIFACT_DIR)
     parser.add_argument("--rankscaled-dir", type=Path, default=DEFAULT_RANKSCALED_DIR)
     parser.add_argument("--output-dir", type=Path, default=None)
@@ -1891,12 +2875,33 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--shortlist", type=int, default=3)
     parser.add_argument("--seed", type=int, default=DEFAULT_SEED)
     parser.add_argument("--max-iterations", type=int, default=4000)
-    parser.add_argument("--refine-passes", type=int, default=10)
+    parser.add_argument("--refine-passes", type=int, default=60)
     parser.add_argument("--separation-drop", type=float, default=0.01)
     parser.add_argument("--ks-increase", type=float, default=0.005)
+    parser.add_argument(
+        "--min-near-decile-stretch",
+        type=float,
+        default=1.00,
+        help=(
+            "realised near-field decile median stretch a candidate must reach "
+            "before it may be ranked; guards the user's 'near pairs open up a "
+            "little' requirement at the coordinate level, not just in f"
+        ),
+    )
+    parser.add_argument(
+        "--durable-copy-dir", type=Path, default=DEFAULT_DURABLE_COPY_DIR
+    )
     parser.add_argument("--probe-points", type=int, default=DEFAULT_PROBE_POINTS)
     parser.add_argument(
         "--uniform-replicates", type=int, default=DEFAULT_UNIFORM_REPLICATES
+    )
+    parser.add_argument("--frontier-starts", type=int, default=4)
+    parser.add_argument("--mean-norm-increase", type=float, default=0.005)
+    parser.add_argument(
+        "--centering-weights",
+        type=float,
+        nargs="+",
+        default=[10000.0, 100000.0, 400000.0, 800000.0],
     )
     parser.add_argument("--no-write", action="store_true")
     return parser.parse_args(argv)
@@ -1906,7 +2911,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = parse_args(argv)
     if args.mode == "linear":
         return run_linear_mode(args)
-    return run_convex_mode(args)
+    if args.mode == "convex":
+        return run_convex_mode(args)
+    return run_frontier_mode(args)
 
 
 if __name__ == "__main__":
