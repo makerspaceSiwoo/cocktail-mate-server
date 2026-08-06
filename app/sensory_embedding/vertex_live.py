@@ -41,12 +41,16 @@ from app.sensory_embedding.vertex_batch import (
     SHARD_SIZE,
     SOFT_STOP_USD,
     TERMINAL_JOB_STATES,
+    GcsLifecycleContract,
     RunCostLedger,
     VertexSensoryBatchError,
     atomic_create,
     estimate_cost,
+    echoed_request_prompt_sha256,
     gcs_run_metadata,
     guard_production_job_creation,
+    id_set_sha256,
+    manifest_requests_by_shard,
     sha256_bytes,
     utc_now,
 )
@@ -62,6 +66,7 @@ LIVE_SHARD_SIZE = SHARD_SIZE
 LIVE_ID_ALLOWLIST_SHA256 = COHORT_ID_SET_SHA256
 LIVE_ID_ALLOWLIST_SOURCE_FILE_SHA256 = COHORT_SOURCE_FILE_SHA256
 LIVE_FLAG = "--execute-live"
+LIVE_PILOT_FLAG = "--execute-live-pilot"
 API_KEY_ENV_VARS = ("GEMINI_API_KEY", "GOOGLE_API_KEY")
 UNKNOWN_REMOTE_STATE = "UNKNOWN_REMOTE_STATE"
 CREATION_DISPATCHING = "CREATION_DISPATCHING"
@@ -74,6 +79,25 @@ RESOURCE_MANAGER_API = "https://cloudresourcemanager.googleapis.com/v1"
 DEFAULT_TIMEOUT_SECONDS = 30.0
 LEDGER_SCHEMA_VERSION = 1
 EVENT_SCHEMA_VERSION = 1
+FULL_RUN_SCOPE = "full-production-602"
+PILOT_RUN_SCOPE = "live-pilot-10x48"
+LIVE_PILOT_MANIFEST_TYPE = "sensory-teacher-live-pilot-v1"
+LIVE_PILOT_STATUS = "PREPARED_FOR_LIVE_PILOT_ONLY"
+LIVE_PILOT_ROWS = 10
+LIVE_PILOT_REQUEST_COUNT = 480
+LIVE_PILOT_SHARD_SIZE = 60
+LIVE_PILOT_SELECTION_POLICY = "recipe_feature_jaccard_k_center_v1"
+LIVE_PILOT_SELECTED_IDS = (40, 49, 129, 157, 188, 515, 522, 539, 544, 561)
+LIVE_PILOT_SELECTED_ID_SET_SHA256 = (
+    "fa79501cc27a54850808efdb90d071c2da665f69a5d238c8154b3c2e3247498a"
+)
+LIVE_PILOT_FROZEN_SOURCE_SHA256 = (
+    "4a51835460938ddebc11507d34da2835796e4f73179b15279ddd94253523560b"
+)
+LIVE_PILOT_APPROVAL_MARKER = "USER_APPROVED_VERTEX_LIVE_PILOT_10X48_V1"
+LIVE_PILOT_APPROVAL_MARKER_SHA256 = (
+    "e595acef7f3dba3f0ea87812cbab7f78e555bbafa69fad171a83a8270ff96297"
+)
 _CLOUD_PLATFORM_SCOPE = "https://www.googleapis.com/auth/cloud-platform"
 REQUIRED_GCS_PERMISSIONS = frozenset(
     {
@@ -745,6 +769,8 @@ def _new_ledger(
     manifest: Mapping[str, Any],
     manifest_sha256: str,
     now: str,
+    run_scope: str,
+    shard_record_count: int,
 ) -> dict[str, Any]:
     run_id = manifest.get("run_id")
     if not isinstance(run_id, str) or not run_id:
@@ -756,6 +782,8 @@ def _new_ledger(
         "schema_version": LEDGER_SCHEMA_VERSION,
         "manifest_sha256": manifest_sha256,
         "run_id_sha256": _sha256_text(run_id),
+        "run_scope": run_scope,
+        "shard_record_count": shard_record_count,
         "historical_cost_usd": "0.00",
         "bucket": {
             "name": _bucket_name(manifest_sha256),
@@ -847,7 +875,19 @@ def _validate_ledger_structure(ledger: Mapping[str, Any]) -> None:
             "live ledger historical cost is invalid",
             phase="ledger_validation",
         )
-    expected_cost = estimate_cost(LIVE_SHARD_SIZE).estimated_cost_usd
+    run_scope = ledger.get("run_scope", FULL_RUN_SCOPE)
+    shard_record_count = ledger.get("shard_record_count", LIVE_SHARD_SIZE)
+    if (
+        run_scope not in {FULL_RUN_SCOPE, PILOT_RUN_SCOPE}
+        or type(shard_record_count) is not int
+        or shard_record_count
+        != (LIVE_SHARD_SIZE if run_scope == FULL_RUN_SCOPE else LIVE_PILOT_SHARD_SIZE)
+    ):
+        raise VertexLiveError(
+            "live ledger run scope is invalid",
+            phase="ledger_validation",
+        )
+    expected_cost = estimate_cost(shard_record_count).estimated_cost_usd
     indexes: set[int] = set()
     names: set[str] = set()
     allowed_states = (
@@ -1037,6 +1077,141 @@ def _validate_live_manifest(manifest: Mapping[str, Any]) -> None:
         )
 
 
+def _validate_live_pilot_manifest(
+    manifest: Mapping[str, Any],
+    *,
+    user_approval_marker: str,
+) -> None:
+    """Validate the isolated 10×48 pilot without authorizing production."""
+
+    expected = {
+        "schema_version": 1,
+        "manifest_type": LIVE_PILOT_MANIFEST_TYPE,
+        "status": LIVE_PILOT_STATUS,
+        "run_scope": PILOT_RUN_SCOPE,
+        "full_production_authorized": False,
+        "model": MODEL_ID,
+        "project": PROJECT,
+        "location": LOCATION,
+        "row_count": LIVE_PILOT_ROWS,
+        "request_count": LIVE_PILOT_REQUEST_COUNT,
+        "shard_count": SHARD_COUNT,
+        "shard_size": LIVE_PILOT_SHARD_SIZE,
+        "parent_cohort_row_count": LIVE_CORPUS_ROWS,
+        "parent_cohort_id_set_sha256": LIVE_ID_ALLOWLIST_SHA256,
+        "parent_cohort_source_sha256": LIVE_ID_ALLOWLIST_SOURCE_FILE_SHA256,
+        "parent_frozen_source_sha256": LIVE_PILOT_FROZEN_SOURCE_SHA256,
+        "selected_id_set_sha256": LIVE_PILOT_SELECTED_ID_SET_SHA256,
+        "selection_policy": LIVE_PILOT_SELECTION_POLICY,
+        "registry_sha256": SENSORY_V2_REGISTRY.registry_sha256,
+        "prompt_axis_registry_file_sha256": AXIS_REGISTRY_FILE_SHA256,
+        "prompt_sha256": PROMPT_SHA256,
+        "request_config_sha256": REQUEST_CONFIG_SHA256,
+        "historical_reserve_usd": str(HISTORICAL_RESERVE_USD),
+        "soft_stop_usd": str(SOFT_STOP_USD),
+        "hard_creation_block_usd": str(HARD_CREATION_BLOCK_USD),
+        "user_approval_marker_sha256": LIVE_PILOT_APPROVAL_MARKER_SHA256,
+        "gcs_lifecycle": GcsLifecycleContract().to_dict(),
+    }
+    for field, required in expected.items():
+        if manifest.get(field) != required:
+            raise VertexSensoryBatchError(
+                f"live pilot manifest {field} does not match the reviewed contract"
+            )
+    if user_approval_marker != LIVE_PILOT_APPROVAL_MARKER or _sha256_text(
+        user_approval_marker
+    ) != manifest.get("user_approval_marker_sha256"):
+        raise VertexSensoryBatchError(
+            "live pilot requires the exact explicit user approval marker"
+        )
+    selected_ids = manifest.get("selected_cocktail_ids")
+    if (
+        not isinstance(selected_ids, list)
+        or tuple(selected_ids) != LIVE_PILOT_SELECTED_IDS
+        or id_set_sha256(selected_ids) != LIVE_PILOT_SELECTED_ID_SET_SHA256
+    ):
+        raise VertexSensoryBatchError(
+            "live pilot selected IDs do not match the deterministic cohort sample"
+        )
+    requests = manifest.get("requests")
+    if not isinstance(requests, list) or len(requests) != LIVE_PILOT_REQUEST_COUNT:
+        raise VertexSensoryBatchError(
+            "live pilot manifest must contain exactly 480 request identities"
+        )
+    seen: set[tuple[int, int]] = set()
+    prompt_hashes: set[str] = set()
+    for request in requests:
+        if not isinstance(request, Mapping):
+            raise VertexSensoryBatchError("live pilot request identity is invalid")
+        row_index = request.get("row_index")
+        cocktail_id = request.get("cocktail_id")
+        axis_order = request.get("axis_order")
+        shard_index = request.get("shard_index")
+        prompt_hash = request.get("prompt_sha256")
+        if (
+            type(row_index) is not int
+            or row_index not in range(LIVE_PILOT_ROWS)
+            or cocktail_id != LIVE_PILOT_SELECTED_IDS[row_index]
+            or type(axis_order) is not int
+            or axis_order not in range(48)
+            or request.get("axis_id") != SENSORY_V2_REGISTRY.axes[axis_order].axis_id
+            or request.get("key") != f"r{row_index:04d}-a{axis_order:02d}"
+            or shard_index != axis_order % SHARD_COUNT
+            or not isinstance(prompt_hash, str)
+            or re.fullmatch(r"[0-9a-f]{64}", prompt_hash) is None
+            or (row_index, axis_order) in seen
+            or prompt_hash in prompt_hashes
+        ):
+            raise VertexSensoryBatchError(
+                "live pilot request identities are incomplete or inconsistent"
+            )
+        seen.add((row_index, axis_order))
+        prompt_hashes.add(prompt_hash)
+    if len(seen) != LIVE_PILOT_REQUEST_COUNT:
+        raise VertexSensoryBatchError(
+            "live pilot request identities do not cover 10×48"
+        )
+    shards = manifest.get("shards")
+    if (
+        not isinstance(shards, list)
+        or len(shards) != SHARD_COUNT
+        or any(
+            not isinstance(shard, Mapping)
+            or shard.get("shard_index") != index
+            or shard.get("filename") != f"requests-{index:02d}.jsonl"
+            or shard.get("record_count") != LIVE_PILOT_SHARD_SIZE
+            or shard.get("axis_orders") != list(range(index, 48, SHARD_COUNT))
+            for index, shard in enumerate(shards)
+        )
+    ):
+        raise VertexSensoryBatchError(
+            "live pilot requires eight ordered 60-record shards"
+        )
+    estimate = estimate_cost(LIVE_PILOT_REQUEST_COUNT)
+    projected = HISTORICAL_RESERVE_USD + estimate.estimated_cost_usd
+    if (
+        manifest.get("estimated_cost_usd") != str(estimate.estimated_cost_usd)
+        or projected >= SOFT_STOP_USD
+        or projected >= HARD_CREATION_BLOCK_USD
+    ):
+        raise VertexSensoryBatchError("live pilot budget contract is invalid")
+
+
+def _validate_manifest_prompt_uniqueness(manifest: Mapping[str, Any]) -> None:
+    request_shards = manifest_requests_by_shard(manifest)
+    prompt_hashes = [
+        request.get("prompt_sha256") for shard in request_shards for request in shard
+    ]
+    if any(
+        not isinstance(value, str) or re.fullmatch(r"[0-9a-f]{64}", value) is None
+        for value in prompt_hashes
+    ) or len(prompt_hashes) != len(set(prompt_hashes)):
+        raise VertexLiveError(
+            "manifest request prompt identities must be unique SHA-256 values",
+            phase="manifest_validation",
+        )
+
+
 def _assert_no_active_job(ledger: Mapping[str, Any]) -> None:
     nonterminal = [
         job
@@ -1143,6 +1318,33 @@ def _validate_shard(
             "input shard record count does not match the manifest",
             phase="shard_validation",
         )
+    try:
+        request_shards = manifest_requests_by_shard(manifest)
+    except VertexSensoryBatchError as error:
+        raise VertexLiveError(
+            "manifest request identities are invalid",
+            phase="shard_validation",
+        ) from error
+    expected_requests = request_shards[shard_index]
+    lines = data.splitlines()
+    if len(expected_requests) != record_count:
+        raise VertexLiveError(
+            "manifest request identities do not match shard count",
+            phase="shard_validation",
+        )
+    for line, request in zip(lines, expected_requests, strict=True):
+        try:
+            prompt_sha256 = echoed_request_prompt_sha256(line)
+        except VertexSensoryBatchError as error:
+            raise VertexLiveError(
+                "input shard request line violates the canonical request contract",
+                phase="shard_validation",
+            ) from error
+        if prompt_sha256 != request.get("prompt_sha256"):
+            raise VertexLiveError(
+                "input shard prompt does not match its manifest request identity",
+                phase="shard_validation",
+            )
     return data, raw
 
 
@@ -1163,12 +1365,30 @@ def submit_shard_once(
     storage_factory: StorageFactory = _default_storage_factory,
     batch_factory: BatchFactory = _default_batch_factory,
     clock: Clock = utc_now,
+    _run_scope: str = FULL_RUN_SCOPE,
+    _user_approval_marker: str = "",
 ) -> dict[str, Any]:
     """Upload one immutable shard and create its Batch job exactly once."""
 
     _require_live(execute_live)
     with _operation_lock(ledger_path):
         manifest, manifest_sha = _load_manifest(manifest_path)
+        try:
+            if _run_scope == FULL_RUN_SCOPE:
+                _validate_live_manifest(manifest)
+            elif _run_scope == PILOT_RUN_SCOPE:
+                _validate_live_pilot_manifest(
+                    manifest,
+                    user_approval_marker=_user_approval_marker,
+                )
+            else:
+                raise VertexSensoryBatchError("unknown live run scope")
+            _validate_manifest_prompt_uniqueness(manifest)
+        except VertexSensoryBatchError as error:
+            raise VertexLiveError(
+                "offline manifest scope, approval, or lifecycle gate failed",
+                phase="offline_gate",
+            ) from error
         shard_data, shard = _validate_shard(
             manifest_path,
             manifest,
@@ -1193,15 +1413,19 @@ def submit_shard_once(
                 manifest=manifest,
                 manifest_sha256=manifest_sha,
                 now=now,
+                run_scope=_run_scope,
+                shard_record_count=(
+                    LIVE_SHARD_SIZE
+                    if _run_scope == FULL_RUN_SCOPE
+                    else LIVE_PILOT_SHARD_SIZE
+                ),
             )
 
-        try:
-            _validate_live_manifest(manifest)
-        except VertexSensoryBatchError as error:
+        if ledger.get("run_scope", FULL_RUN_SCOPE) != _run_scope:
             raise VertexLiveError(
-                "offline 602-cohort manifest, pilot, or lifecycle gate failed",
-                phase="offline_gate",
-            ) from error
+                "live ledger scope does not match the create path",
+                phase="ledger_validation",
+            )
         _assert_no_active_job(ledger)
         job_estimate = estimate_cost(int(shard["record_count"]))
         projected = _guard_cumulative_budget(
@@ -1427,7 +1651,42 @@ def submit_shard_once(
             "create_attempts": 1,
             "retry_attempted": False,
             "fallback_attempted": False,
+            "run_scope": _run_scope,
         }
+
+
+def submit_pilot_shard_once(
+    *,
+    execute_live_pilot: bool,
+    user_approval_marker: str,
+    manifest_path: Path,
+    ledger_path: Path,
+    shard_index: int,
+    credential_loader: CredentialLoader = load_service_account_adc,
+    storage_factory: StorageFactory = _default_storage_factory,
+    batch_factory: BatchFactory = _default_batch_factory,
+    clock: Clock = utc_now,
+) -> dict[str, Any]:
+    """Use only the explicit 10×48 live-pilot manifest and approval scope."""
+
+    if not execute_live_pilot:
+        raise VertexLiveError(
+            f"pilot network access is disabled without {LIVE_PILOT_FLAG}",
+            phase="authorization",
+        )
+    return submit_shard_once(
+        execute_live=True,
+        manifest_path=manifest_path,
+        ledger_path=ledger_path,
+        shard_index=shard_index,
+        allow_soft_stop_override=False,
+        credential_loader=credential_loader,
+        storage_factory=storage_factory,
+        batch_factory=batch_factory,
+        clock=clock,
+        _run_scope=PILOT_RUN_SCOPE,
+        _user_approval_marker=user_approval_marker,
+    )
 
 
 def refresh_job_status(

@@ -27,6 +27,7 @@ from app.sensory_embedding.vertex_batch import (
     records_jsonl_bytes,
     sha256_bytes,
     utc_now,
+    validate_full_production_token_counts,
     validate_pilot_token_counts,
 )
 
@@ -183,9 +184,14 @@ def _build(arguments: argparse.Namespace) -> dict[str, object]:
             raise VertexSensoryBatchError(
                 "pilot token-count keys must be a non-empty request subset"
             )
-        pilot = validate_pilot_token_counts(
-            counts,
-            [all_requests[key] for key in counts],
+        selected_requests = [all_requests[key] for key in counts]
+        pilot = (
+            validate_pilot_token_counts(counts, selected_requests)
+            if arguments.allow_partial
+            else validate_full_production_token_counts(
+                counts,
+                selected_requests,
+            )
         )
 
     manifest = build_manifest(

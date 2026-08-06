@@ -55,6 +55,10 @@ GCS_LIFECYCLE_DAYS = 1
 MANIFEST_SCHEMA_VERSION = 1
 LEDGER_SCHEMA_VERSION = 1
 RESULT_SCHEMA_VERSION = 1
+PILOT_TOKEN_STATUS = "pilot_passed"
+FULL_PRODUCTION_TOKEN_STATUS = "full_production_token_review_passed"
+FULL_PRODUCTION_TOKEN_REVIEW_SCOPE = "full-production-token-envelope"
+MIN_FULL_PRODUCTION_TOKEN_MEASUREMENTS = SHARD_COUNT
 
 LABELS = tuple(TEACHER_LABELS)
 SOURCE_PRIMARY_COLUMN = "normalized_recipe_json"
@@ -745,13 +749,42 @@ def validate_pilot_token_counts(
             f"{PLANNING_INPUT_TOKEN_ENVELOPE}"
         )
     return {
-        "status": "pilot_passed",
+        "status": PILOT_TOKEN_STATUS,
         "planning_input_tokens_per_request": PLANNING_INPUT_TOKEN_ENVELOPE,
         "measured_request_count": len(token_counts),
         "measured_min_tokens": min(token_counts.values()),
         "measured_max_tokens": maximum,
         "measured_mean_tokens": math.fsum(token_counts.values()) / len(token_counts),
         "token_counts_sha256": canonical_sha256(dict(sorted(token_counts.items()))),
+    }
+
+
+def validate_full_production_token_counts(
+    token_counts: Mapping[str, int],
+    requests: Sequence[SensoryBatchRequest],
+) -> dict[str, object]:
+    """Create explicit reviewed evidence for a full 602-cocktail manifest.
+
+    Ordinary pilot evidence deliberately retains ``pilot_passed`` and cannot
+    authorize production. A full manifest builder must call this separate
+    boundary with at least one measured request from every axis shard.
+    """
+
+    evidence = validate_pilot_token_counts(token_counts, requests)
+    if len(requests) < MIN_FULL_PRODUCTION_TOKEN_MEASUREMENTS:
+        raise VertexSensoryBatchError(
+            "full production token review requires at least eight measurements"
+        )
+    shard_indexes = {request.shard_index for request in requests}
+    if shard_indexes != set(range(SHARD_COUNT)):
+        raise VertexSensoryBatchError(
+            "full production token review must cover all eight shards"
+        )
+    return {
+        **evidence,
+        "status": FULL_PRODUCTION_TOKEN_STATUS,
+        "review_scope": FULL_PRODUCTION_TOKEN_REVIEW_SCOPE,
+        "full_production_authorized": True,
     }
 
 
@@ -1104,9 +1137,14 @@ def guard_production_job_creation(
 
     validate_full_manifest(manifest)
     pilot = manifest.get("pilot_token_envelope")
-    if not isinstance(pilot, Mapping) or pilot.get("status") != "pilot_passed":
+    if (
+        not isinstance(pilot, Mapping)
+        or pilot.get("status") != FULL_PRODUCTION_TOKEN_STATUS
+        or pilot.get("review_scope") != FULL_PRODUCTION_TOKEN_REVIEW_SCOPE
+        or pilot.get("full_production_authorized") is not True
+    ):
         raise VertexSensoryBatchError(
-            "production job creation requires a reviewed passing token pilot"
+            "production job creation requires explicit full-production token review"
         )
     planned = pilot.get("planning_input_tokens_per_request")
     measured_count = pilot.get("measured_request_count")
@@ -1117,7 +1155,7 @@ def guard_production_job_creation(
     if (
         planned != PLANNING_INPUT_TOKEN_ENVELOPE
         or type(measured_count) is not int
-        or measured_count <= 0
+        or measured_count < MIN_FULL_PRODUCTION_TOKEN_MEASUREMENTS
         or measured_count > REQUEST_COUNT
         or type(minimum) is not int
         or minimum <= 0
@@ -1357,54 +1395,134 @@ def manifest_requests_by_shard(
     return tuple(tuple(shard) for shard in shards)
 
 
+def echoed_request_prompt_sha256(raw_line: bytes) -> str:
+    """Validate one echoed Vertex request and return its prompt identity."""
+
+    try:
+        decoded = json.loads(raw_line)
+    except (UnicodeError, json.JSONDecodeError) as error:
+        raise VertexSensoryBatchError("response line is invalid JSON") from error
+    if not isinstance(decoded, Mapping):
+        raise VertexSensoryBatchError("response line must be a JSON object")
+    echoed = decoded.get("request")
+    if not isinstance(echoed, Mapping):
+        raise VertexSensoryBatchError("response line has no echoed request")
+    if set(echoed) != {"contents", "generationConfig"}:
+        raise VertexSensoryBatchError("echoed request fields do not match the contract")
+    if echoed.get("generationConfig") != REQUEST_CONFIG:
+        raise VertexSensoryBatchError(
+            "echoed request generationConfig does not match the contract"
+        )
+    contents = echoed.get("contents")
+    if (
+        not isinstance(contents, list)
+        or len(contents) != 1
+        or not isinstance(contents[0], Mapping)
+        or contents[0].get("role") != "user"
+    ):
+        raise VertexSensoryBatchError("echoed request contents are invalid")
+    parts = contents[0].get("parts")
+    if (
+        not isinstance(parts, list)
+        or len(parts) != 1
+        or not isinstance(parts[0], Mapping)
+        or set(parts[0]) != {"text"}
+        or not isinstance(parts[0].get("text"), str)
+    ):
+        raise VertexSensoryBatchError("echoed request prompt is invalid")
+    prompt = str(parts[0]["text"])
+    return sha256_bytes(prompt.encode("utf-8"))
+
+
+def _requests_by_prompt_sha256(
+    manifest: Mapping[str, object],
+) -> dict[str, Mapping[str, object]]:
+    if manifest.get("request_config_sha256") != REQUEST_CONFIG_SHA256:
+        raise VertexSensoryBatchError(
+            "manifest request config SHA-256 does not match the canonical contract"
+        )
+    shards = manifest_requests_by_shard(manifest)
+    by_prompt: dict[str, Mapping[str, object]] = {}
+    for request in (request for shard in shards for request in shard):
+        prompt_sha256 = request.get("prompt_sha256")
+        if not isinstance(prompt_sha256, str):
+            raise VertexSensoryBatchError("manifest request prompt SHA-256 is missing")
+        validate_sha256(prompt_sha256, field="manifest request prompt_sha256")
+        if prompt_sha256 in by_prompt:
+            raise VertexSensoryBatchError(
+                "manifest request prompt SHA-256 values must be unique"
+            )
+        by_prompt[prompt_sha256] = request
+    return by_prompt
+
+
 def parse_recorded_outputs(
     manifest: Mapping[str, object],
     output_paths: Sequence[Path],
 ) -> tuple[tuple[ParsedDistribution, ...], tuple[QuarantineRecord, ...]]:
-    """Parse outputs by stable shard line order and quarantine every bad record."""
+    """Parse echoed identities safely despite line or output-shard reordering."""
 
     if len(output_paths) != SHARD_COUNT:
         raise VertexSensoryBatchError("exactly 8 output shard paths are required")
-    request_shards = manifest_requests_by_shard(manifest)
+    by_prompt = _requests_by_prompt_sha256(manifest)
+    expected_keys = {str(request["key"]) for request in by_prompt.values()}
     parsed: list[ParsedDistribution] = []
     quarantined: list[QuarantineRecord] = []
-    for shard_index, (path, requests) in enumerate(
-        zip(output_paths, request_shards, strict=True)
-    ):
+    seen_keys: set[str] = set()
+    all_lines: list[tuple[int, int, bytes]] = []
+    for shard_index, path in enumerate(output_paths):
         try:
             lines = path.read_bytes().splitlines()
         except OSError as error:
             raise VertexSensoryBatchError(
                 f"cannot read response shard {path}"
             ) from error
-        if len(lines) != len(requests):
-            raise VertexSensoryBatchError(
-                f"shard {shard_index} has {len(lines)} responses for "
-                f"{len(requests)} requests"
-            )
-        for line_number, (line, request) in enumerate(
-            zip(lines, requests, strict=True), start=1
-        ):
-            try:
-                parsed.append(parse_response_line(line, request))
-            except (KeyError, TypeError, ValueError) as error:
-                response_hash: str | None = None
-                try:
-                    decoded = json.loads(line)
-                    if isinstance(decoded, Mapping):
-                        response_hash = canonical_sha256(_response_object(decoded))
-                except (ValueError, TypeError):
-                    pass
-                quarantined.append(
-                    QuarantineRecord(
-                        key=str(request.get("key", "")),
-                        shard_index=shard_index,
-                        line_number=line_number,
-                        reason=str(error),
-                        raw_response_sha256=sha256_bytes(line),
-                        response_sha256=response_hash,
-                    )
+        all_lines.extend(
+            (shard_index, line_number, line)
+            for line_number, line in enumerate(lines, start=1)
+        )
+    if len(all_lines) != len(by_prompt):
+        raise VertexSensoryBatchError(
+            f"received {len(all_lines)} responses for {len(by_prompt)} requests"
+        )
+    for shard_index, line_number, line in all_lines:
+        request: Mapping[str, object] | None = None
+        key = ""
+        try:
+            prompt_sha256 = echoed_request_prompt_sha256(line)
+            request = by_prompt.get(prompt_sha256)
+            if request is None:
+                raise VertexSensoryBatchError(
+                    "echoed request prompt is absent from the manifest"
                 )
+            key = str(request.get("key", ""))
+            if key in seen_keys:
+                raise VertexSensoryBatchError("duplicate echoed request identity")
+            seen_keys.add(key)
+            parsed.append(parse_response_line(line, request))
+        except (KeyError, TypeError, ValueError) as error:
+            response_hash: str | None = None
+            try:
+                decoded = json.loads(line)
+                if isinstance(decoded, Mapping):
+                    response_hash = canonical_sha256(_response_object(decoded))
+            except (ValueError, TypeError):
+                pass
+            quarantined.append(
+                QuarantineRecord(
+                    key=key,
+                    shard_index=shard_index,
+                    line_number=line_number,
+                    reason=str(error),
+                    raw_response_sha256=sha256_bytes(line),
+                    response_sha256=response_hash,
+                )
+            )
+    missing = sorted(expected_keys - seen_keys)
+    if missing:
+        raise VertexSensoryBatchError(
+            f"missing {len(missing)} echoed request identities"
+        )
     parsed.sort(key=lambda item: (item.cocktail_id, item.axis_order))
     quarantined.sort(key=lambda item: (item.shard_index, item.line_number))
     return tuple(parsed), tuple(quarantined)

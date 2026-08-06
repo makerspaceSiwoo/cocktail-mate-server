@@ -23,6 +23,64 @@ manifest must also bind the exact reviewed project
 `gemini-2.5-flash`, prompt/config/registry hashes, a passing token pilot, the
 one-day lifecycle contract, and the $7.50 soft/$10 hard budget controls.
 
+An ordinary `pilot_passed` token-count object does not authorize this full
+path. Full creation requires the separate
+`full_production_token_review_passed` state, explicit
+`full-production-token-envelope` scope, at least eight measured requests, and
+coverage of all eight shards. A one-request fixture cannot unlock production.
+
+## Isolated real-cocktail pilot
+
+The real pilot has a manifest type and live create command distinct from the
+602-cocktail production path:
+
+- exact pinned parent cohort and frozen-source hashes;
+- deterministic recipe-feature Jaccard k-center selection of ten reviewed IDs;
+- ten cocktails × 48 axes = 480 requests;
+- eight axis-modulo shards of exactly 60 records;
+- `full_production_authorized: false`;
+- conservative cost `$0.08004` before the historical reserve;
+- a hashed manifest approval marker plus the same explicit marker at CLI time.
+
+Prepare it locally without cloud, credential, or database access:
+
+```bash
+python -m scripts.prepare_sensory_real_pilot \
+  --frozen-source sensory-batch/RUN/frozen-cocktails.csv \
+  --cohort-source taste-data/cocktail-taste-descriptions.csv \
+  --output-dir sensory-batch/PILOT \
+  --run-id PILOT_RUN_ID \
+  --created-at REVIEWED_TIMESTAMP \
+  --user-approval-marker USER_APPROVED_VERTEX_LIVE_PILOT_10X48_V1
+```
+
+After a separate submission decision, create one pilot shard only:
+
+```bash
+python -m scripts.sensory_vertex_live pilot-create \
+  --execute-live-pilot \
+  --user-approval-marker USER_APPROVED_VERTEX_LIVE_PILOT_10X48_V1 \
+  --manifest sensory-batch/PILOT/pilot-manifest.json \
+  --ledger sensory-batch/PILOT/live-ledger.json \
+  --shard-index 0
+```
+
+The pilot command cannot consume a full manifest, and the full `create` command
+cannot consume a pilot manifest. Each pilot job still obeys the one-active-job,
+no-resubmit, soft-stop, and hard-limit state machine. Pilot completion never
+changes the manifest to a production-authorized state.
+
+Before any upload, every JSONL line is parsed and checked against its manifest
+request identity: the prompt SHA-256 must match, the request config must equal
+the canonical enum/logprobs config, and request prompt identities must be
+unique. Changing a shard and updating only its shard hash cannot substitute
+different content.
+
+Downloaded response parsing uses the echoed canonical request prompt/config to
+find the manifest identity. It therefore tolerates output line and file
+reordering while failing closed on unknown, duplicate, missing, or
+config-mismatched echoed requests.
+
 ## Authentication and preflight
 
 Every remote command requires `--execute-live`. Authentication is

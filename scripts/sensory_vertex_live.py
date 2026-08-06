@@ -9,10 +9,12 @@ from pathlib import Path
 
 from app.sensory_embedding.vertex_live import (
     LIVE_FLAG,
+    LIVE_PILOT_FLAG,
     VertexLiveError,
     cleanup_run,
     download_outputs,
     refresh_job_status,
+    submit_pilot_shard_once,
     submit_shard_once,
 )
 
@@ -32,6 +34,16 @@ def _parser() -> argparse.ArgumentParser:
     create.add_argument("--ledger", type=Path, required=True)
     create.add_argument("--shard-index", type=int, required=True)
     create.add_argument("--allow-soft-stop-override", action="store_true")
+
+    pilot_create = commands.add_parser(
+        "pilot-create",
+        help="Upload and create one reviewed 10×48 pilot shard once.",
+    )
+    pilot_create.add_argument(LIVE_PILOT_FLAG, action="store_true")
+    pilot_create.add_argument("--user-approval-marker", required=True)
+    pilot_create.add_argument("--manifest", type=Path, required=True)
+    pilot_create.add_argument("--ledger", type=Path, required=True)
+    pilot_create.add_argument("--shard-index", type=int, required=True)
 
     status = commands.add_parser("status", help="Read one remote job state once.")
     status.add_argument(LIVE_FLAG, action="store_true")
@@ -66,6 +78,14 @@ def main(argv: Sequence[str] | None = None) -> int:
                 ledger_path=arguments.ledger,
                 shard_index=arguments.shard_index,
                 allow_soft_stop_override=arguments.allow_soft_stop_override,
+            )
+        elif arguments.command == "pilot-create":
+            result = submit_pilot_shard_once(
+                execute_live_pilot=arguments.execute_live_pilot,
+                user_approval_marker=arguments.user_approval_marker,
+                manifest_path=arguments.manifest,
+                ledger_path=arguments.ledger,
+                shard_index=arguments.shard_index,
             )
         elif arguments.command == "status":
             result = refresh_job_status(

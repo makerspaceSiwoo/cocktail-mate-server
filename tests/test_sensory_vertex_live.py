@@ -17,20 +17,36 @@ from app.sensory_embedding.vertex_batch import (
     GcsLifecycleContract,
     HARD_CREATION_BLOCK_USD,
     HISTORICAL_RESERVE_USD,
+    FULL_PRODUCTION_TOKEN_REVIEW_SCOPE,
+    FULL_PRODUCTION_TOKEN_STATUS,
     PROMPT_SHA256,
+    REQUEST_CONFIG,
     REQUEST_CONFIG_SHA256,
     SHARD_COUNT,
     SOFT_STOP_USD,
+    estimate_cost,
 )
 from app.sensory_embedding.vertex_live import (
     API_KEY_ENV_VARS,
     BUCKET_LOCATION,
     LIVE_CORPUS_ROWS,
     LIVE_ID_ALLOWLIST_SHA256,
+    LIVE_PILOT_APPROVAL_MARKER,
+    LIVE_PILOT_APPROVAL_MARKER_SHA256,
+    LIVE_PILOT_FROZEN_SOURCE_SHA256,
+    LIVE_PILOT_MANIFEST_TYPE,
+    LIVE_PILOT_REQUEST_COUNT,
+    LIVE_PILOT_ROWS,
+    LIVE_PILOT_SELECTED_IDS,
+    LIVE_PILOT_SELECTED_ID_SET_SHA256,
+    LIVE_PILOT_SELECTION_POLICY,
+    LIVE_PILOT_SHARD_SIZE,
+    LIVE_PILOT_STATUS,
     LIVE_REQUEST_COUNT,
     LIVE_SHARD_SIZE,
     LOCATION as VERTEX_LOCATION,
     MODEL_ID,
+    PILOT_RUN_SCOPE,
     REQUIRED_GCS_PERMISSIONS,
     UNKNOWN_REMOTE_STATE,
     AdcIdentity,
@@ -43,6 +59,7 @@ from app.sensory_embedding.vertex_live import (
     cleanup_run,
     download_outputs,
     refresh_job_status,
+    submit_pilot_shard_once,
     submit_shard_once,
 )
 
@@ -60,7 +77,7 @@ def _identity() -> AdcIdentity:
 def _manifest_fixture(
     tmp_path: Path,
     *,
-    pilot_status: str = "pilot_passed",
+    pilot_status: str = FULL_PRODUCTION_TOKEN_STATUS,
 ) -> tuple[Path, dict[str, Any]]:
     missing_ids = {
         57,
@@ -91,9 +108,54 @@ def _manifest_fixture(
         cocktail_id for cocktail_id in range(1, 626) if cocktail_id not in missing_ids
     ]
     assert len(cocktail_ids) == LIVE_CORPUS_ROWS
+    requests = [
+        {
+            "key": f"r{row_index:04d}-a{axis.axis_order:02d}",
+            "cocktail_id": cocktail_id,
+            "row_index": row_index,
+            "axis_order": axis.axis_order,
+            "axis_id": axis.axis_id,
+            "shard_index": axis.axis_order % SHARD_COUNT,
+            "prompt_sha256": hashlib.sha256(
+                f"fixture:{row_index}:{axis.axis_order}".encode()
+            ).hexdigest(),
+        }
+        for row_index, cocktail_id in enumerate(cocktail_ids)
+        for axis in SENSORY_V2_REGISTRY.axes
+    ]
+    requests_by_shard = [
+        [request for request in requests if request["shard_index"] == shard_index]
+        for shard_index in range(SHARD_COUNT)
+    ]
     shards: list[dict[str, Any]] = []
-    for shard_index in range(SHARD_COUNT):
-        payload = b"{}\n" * LIVE_SHARD_SIZE
+    for shard_index, shard_requests in enumerate(requests_by_shard):
+        payload = (
+            "\n".join(
+                json.dumps(
+                    {
+                        "request": {
+                            "contents": [
+                                {
+                                    "role": "user",
+                                    "parts": [
+                                        {
+                                            "text": (
+                                                f"fixture:{request['row_index']}:"
+                                                f"{request['axis_order']}"
+                                            )
+                                        }
+                                    ],
+                                }
+                            ],
+                            "generationConfig": REQUEST_CONFIG,
+                        }
+                    },
+                    separators=(",", ":"),
+                )
+                for request in shard_requests
+            )
+            + "\n"
+        ).encode()
         filename = f"requests-{shard_index:02d}.jsonl"
         (tmp_path / filename).write_bytes(payload)
         shards.append(
@@ -105,19 +167,6 @@ def _manifest_fixture(
                 "sha256": hashlib.sha256(payload).hexdigest(),
             }
         )
-    requests = [
-        {
-            "key": f"r{row_index:04d}-a{axis.axis_order:02d}",
-            "cocktail_id": cocktail_id,
-            "row_index": row_index,
-            "axis_order": axis.axis_order,
-            "axis_id": axis.axis_id,
-            "shard_index": axis.axis_order % SHARD_COUNT,
-            "prompt_sha256": "0" * 64,
-        }
-        for row_index, cocktail_id in enumerate(cocktail_ids)
-        for axis in SENSORY_V2_REGISTRY.axes
-    ]
     manifest: dict[str, Any] = {
         "schema_version": 1,
         "run_id": "sensory-live-unit-run",
@@ -140,8 +189,10 @@ def _manifest_fixture(
         "request_config_sha256": REQUEST_CONFIG_SHA256,
         "pilot_token_envelope": {
             "status": pilot_status,
+            "review_scope": FULL_PRODUCTION_TOKEN_REVIEW_SCOPE,
+            "full_production_authorized": True,
             "planning_input_tokens_per_request": 845,
-            "measured_request_count": 1,
+            "measured_request_count": 8,
             "measured_min_tokens": 400,
             "measured_max_tokens": 844,
             "measured_mean_tokens": 622.0,
@@ -155,6 +206,106 @@ def _manifest_fixture(
         "requests": requests,
     }
     path = tmp_path / "manifest.json"
+    path.write_text(json.dumps(manifest, sort_keys=True), encoding="utf-8")
+    return path, manifest
+
+
+def _pilot_manifest_fixture(tmp_path: Path) -> tuple[Path, dict[str, Any]]:
+    requests = [
+        {
+            "key": f"r{row_index:04d}-a{axis.axis_order:02d}",
+            "cocktail_id": cocktail_id,
+            "row_index": row_index,
+            "axis_order": axis.axis_order,
+            "axis_id": axis.axis_id,
+            "shard_index": axis.axis_order % SHARD_COUNT,
+            "prompt_sha256": hashlib.sha256(
+                f"pilot:{row_index}:{axis.axis_order}".encode()
+            ).hexdigest(),
+        }
+        for row_index, cocktail_id in enumerate(LIVE_PILOT_SELECTED_IDS)
+        for axis in SENSORY_V2_REGISTRY.axes
+    ]
+    shards: list[dict[str, Any]] = []
+    for shard_index in range(SHARD_COUNT):
+        shard_requests = [
+            request for request in requests if request["shard_index"] == shard_index
+        ]
+        payload = (
+            "\n".join(
+                json.dumps(
+                    {
+                        "request": {
+                            "contents": [
+                                {
+                                    "role": "user",
+                                    "parts": [
+                                        {
+                                            "text": (
+                                                f"pilot:{request['row_index']}:"
+                                                f"{request['axis_order']}"
+                                            )
+                                        }
+                                    ],
+                                }
+                            ],
+                            "generationConfig": REQUEST_CONFIG,
+                        }
+                    },
+                    separators=(",", ":"),
+                )
+                for request in shard_requests
+            )
+            + "\n"
+        ).encode()
+        filename = f"requests-{shard_index:02d}.jsonl"
+        (tmp_path / filename).write_bytes(payload)
+        shards.append(
+            {
+                "shard_index": shard_index,
+                "filename": filename,
+                "record_count": LIVE_PILOT_SHARD_SIZE,
+                "axis_orders": list(range(shard_index, 48, SHARD_COUNT)),
+                "sha256": hashlib.sha256(payload).hexdigest(),
+            }
+        )
+    manifest: dict[str, Any] = {
+        "schema_version": 1,
+        "manifest_type": LIVE_PILOT_MANIFEST_TYPE,
+        "run_id": "sensory-live-pilot-unit",
+        "status": LIVE_PILOT_STATUS,
+        "run_scope": PILOT_RUN_SCOPE,
+        "full_production_authorized": False,
+        "model": MODEL_ID,
+        "project": DEFAULT_PROJECT,
+        "location": VERTEX_LOCATION,
+        "row_count": LIVE_PILOT_ROWS,
+        "request_count": LIVE_PILOT_REQUEST_COUNT,
+        "shard_count": SHARD_COUNT,
+        "shard_size": LIVE_PILOT_SHARD_SIZE,
+        "parent_cohort_row_count": LIVE_CORPUS_ROWS,
+        "parent_cohort_id_set_sha256": LIVE_ID_ALLOWLIST_SHA256,
+        "parent_cohort_source_sha256": COHORT_SOURCE_FILE_SHA256,
+        "parent_frozen_source_sha256": LIVE_PILOT_FROZEN_SOURCE_SHA256,
+        "selected_id_set_sha256": LIVE_PILOT_SELECTED_ID_SET_SHA256,
+        "selected_cocktail_ids": list(LIVE_PILOT_SELECTED_IDS),
+        "selection_policy": LIVE_PILOT_SELECTION_POLICY,
+        "registry_sha256": SENSORY_V2_REGISTRY.registry_sha256,
+        "prompt_axis_registry_file_sha256": AXIS_REGISTRY_FILE_SHA256,
+        "prompt_sha256": PROMPT_SHA256,
+        "request_config_sha256": REQUEST_CONFIG_SHA256,
+        "historical_reserve_usd": str(HISTORICAL_RESERVE_USD),
+        "soft_stop_usd": str(SOFT_STOP_USD),
+        "hard_creation_block_usd": str(HARD_CREATION_BLOCK_USD),
+        "user_approval_marker_sha256": LIVE_PILOT_APPROVAL_MARKER_SHA256,
+        "estimated_cost_usd": str(
+            estimate_cost(LIVE_PILOT_REQUEST_COUNT).estimated_cost_usd
+        ),
+        "gcs_lifecycle": GcsLifecycleContract().to_dict(),
+        "shards": shards,
+        "requests": requests,
+    }
+    path = tmp_path / "pilot-manifest.json"
     path.write_text(json.dumps(manifest, sort_keys=True), encoding="utf-8")
     return path, manifest
 
@@ -311,6 +462,146 @@ def test_live_flag_and_offline_pilot_gate_block_before_adc_or_network(
     assert captured.value.phase == "offline_gate"
     assert calls == 0
     assert not ledger_path.exists()
+
+
+def test_live_pilot_scope_requires_marker_and_never_enters_full_create(
+    tmp_path: Path,
+) -> None:
+    pilot_path, _ = _pilot_manifest_fixture(tmp_path)
+    ledger_path = tmp_path / "pilot-ledger.json"
+    adc_calls = 0
+
+    def forbidden_adc() -> AdcIdentity:
+        nonlocal adc_calls
+        adc_calls += 1
+        raise AssertionError("ADC must not be loaded")
+
+    with pytest.raises(VertexLiveError) as missing:
+        submit_pilot_shard_once(
+            execute_live_pilot=False,
+            user_approval_marker=LIVE_PILOT_APPROVAL_MARKER,
+            manifest_path=pilot_path,
+            ledger_path=ledger_path,
+            shard_index=0,
+            credential_loader=forbidden_adc,
+        )
+    assert missing.value.phase == "authorization"
+
+    with pytest.raises(VertexLiveError) as wrong_marker:
+        submit_pilot_shard_once(
+            execute_live_pilot=True,
+            user_approval_marker="wrong",
+            manifest_path=pilot_path,
+            ledger_path=ledger_path,
+            shard_index=0,
+            credential_loader=forbidden_adc,
+        )
+    assert wrong_marker.value.phase == "offline_gate"
+    assert adc_calls == 0
+    assert not ledger_path.exists()
+
+    with pytest.raises(VertexLiveError) as full_path:
+        submit_shard_once(
+            execute_live=True,
+            manifest_path=pilot_path,
+            ledger_path=ledger_path,
+            shard_index=0,
+            credential_loader=forbidden_adc,
+        )
+    assert full_path.value.phase == "offline_gate"
+    assert adc_calls == 0
+
+
+def test_live_pilot_creates_only_one_60_record_shard_attempt(
+    tmp_path: Path,
+) -> None:
+    pilot_path, _ = _pilot_manifest_fixture(tmp_path)
+    ledger_path = tmp_path / "pilot-ledger.json"
+    storage = FakeStorage()
+    batch = FakeBatch()
+
+    result = submit_pilot_shard_once(
+        execute_live_pilot=True,
+        user_approval_marker=LIVE_PILOT_APPROVAL_MARKER,
+        manifest_path=pilot_path,
+        ledger_path=ledger_path,
+        shard_index=0,
+        credential_loader=_identity,
+        storage_factory=lambda credentials: storage,
+        batch_factory=lambda credentials: batch,
+        clock=lambda: "2026-08-06T01:02:03+00:00",
+    )
+
+    assert result["status"] == "BATCH_CREATED"
+    assert result["run_scope"] == PILOT_RUN_SCOPE
+    assert len(storage.upload_calls) == len(batch.create_calls) == 1
+    assert storage.upload_calls[0]["data"].count(b"\n") == LIVE_PILOT_SHARD_SIZE
+    ledger = _read_ledger(ledger_path)
+    assert ledger["run_scope"] == PILOT_RUN_SCOPE
+    assert ledger["shard_record_count"] == LIVE_PILOT_SHARD_SIZE
+    assert ledger["jobs"][0]["estimated_cost_usd"] == str(
+        estimate_cost(LIVE_PILOT_SHARD_SIZE).estimated_cost_usd
+    )
+
+
+def test_shard_content_cannot_be_rebound_by_updating_only_shard_hash(
+    tmp_path: Path,
+) -> None:
+    pilot_path, manifest = _pilot_manifest_fixture(tmp_path)
+    shard_path = tmp_path / "requests-00.jsonl"
+    lines = shard_path.read_text(encoding="utf-8").splitlines()
+    first = json.loads(lines[0])
+    first["request"]["contents"][0]["parts"][0]["text"] = "tampered prompt"
+    lines[0] = json.dumps(first, separators=(",", ":"))
+    payload = ("\n".join(lines) + "\n").encode()
+    shard_path.write_bytes(payload)
+    manifest["shards"][0]["sha256"] = hashlib.sha256(payload).hexdigest()
+    pilot_path.write_text(json.dumps(manifest), encoding="utf-8")
+    adc_calls = 0
+
+    def forbidden_adc() -> AdcIdentity:
+        nonlocal adc_calls
+        adc_calls += 1
+        raise AssertionError("ADC must not be loaded")
+
+    with pytest.raises(VertexLiveError) as captured:
+        submit_pilot_shard_once(
+            execute_live_pilot=True,
+            user_approval_marker=LIVE_PILOT_APPROVAL_MARKER,
+            manifest_path=pilot_path,
+            ledger_path=tmp_path / "ledger.json",
+            shard_index=0,
+            credential_loader=forbidden_adc,
+        )
+
+    assert captured.value.phase == "shard_validation"
+    assert adc_calls == 0
+
+
+def test_one_measured_request_cannot_unlock_full_production(
+    tmp_path: Path,
+) -> None:
+    manifest_path, manifest = _manifest_fixture(tmp_path)
+    manifest["pilot_token_envelope"]["measured_request_count"] = 1
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+    adc_calls = 0
+
+    def forbidden_adc() -> AdcIdentity:
+        nonlocal adc_calls
+        adc_calls += 1
+        raise AssertionError("ADC must not be loaded")
+
+    with pytest.raises(VertexLiveError) as captured:
+        submit_shard_once(
+            execute_live=True,
+            manifest_path=manifest_path,
+            ledger_path=tmp_path / "ledger.json",
+            shard_index=0,
+            credential_loader=forbidden_adc,
+        )
+
+    assert captured.value.phase == "offline_gate"
+    assert adc_calls == 0
 
 
 def test_live_gate_rejects_622_shape_and_wrong_frozen_id_allowlist(

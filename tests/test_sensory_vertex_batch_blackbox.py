@@ -49,6 +49,7 @@ from app.sensory_embedding.vertex_batch import (
     parse_response_line,
     project_ready_records,
     sha256_bytes,
+    validate_full_production_token_counts,
     validate_pilot_token_counts,
 )
 from scripts.sensory_vertex_batch import main as batch_cli
@@ -137,7 +138,7 @@ def production_manifest(
 ) -> dict[str, object]:
     rows, shards = actual_corpus
     pilot_requests = tuple(shard[0] for shard in shards)
-    pilot = validate_pilot_token_counts(
+    pilot = validate_full_production_token_counts(
         {request.key: 100 for request in pilot_requests},
         pilot_requests,
     )
@@ -169,6 +170,7 @@ def _response_line(
     selected: str = "C",
     missing_label: str | None = None,
     snake_case: bool = False,
+    request: SensoryBatchRequest | None = None,
 ) -> bytes:
     candidates: list[dict[str, object]] = [
         {"token": "A", "logProbability": -3.0},
@@ -227,7 +229,11 @@ def _response_line(
         record = {
             "status": "",
             "processed_time": "2026-08-06T00:00:00Z",
-            "request": {"contents": [{"role": "user", "parts": [{"text": "..."}]}]},
+            "request": (
+                request.vertex_record()["request"]
+                if request is not None
+                else {"contents": [{"role": "user", "parts": [{"text": "..."}]}]}
+            ),
             "response": response,
         }
     return json.dumps(record, ensure_ascii=False, separators=(",", ":")).encode()
@@ -608,6 +614,29 @@ def test_pilot_must_cover_exact_keys_and_reject_any_count_above_845(
         validate_pilot_token_counts(over, pilot_requests)
 
 
+def test_ordinary_pilot_evidence_never_unlocks_full_production(
+    production_manifest: dict[str, object],
+    actual_corpus: tuple[
+        tuple[FrozenCocktail, ...],
+        tuple[tuple[SensoryBatchRequest, ...], ...],
+    ],
+) -> None:
+    _, shards = actual_corpus
+    pilot_requests = tuple(shard[0] for shard in shards)
+    ordinary_pilot = validate_pilot_token_counts(
+        {request.key: 100 for request in pilot_requests},
+        pilot_requests,
+    )
+    tampered = deepcopy(production_manifest)
+    tampered["pilot_token_envelope"] = ordinary_pilot
+
+    with pytest.raises(
+        VertexSensoryBatchError,
+        match="full-production token review",
+    ):
+        guard_production_job_creation(tampered, RunCostLedger())
+
+
 def test_production_guard_rejects_manifest_request_identity_tampering(
     production_manifest: dict[str, object],
 ) -> None:
@@ -753,9 +782,10 @@ def test_incomplete_logprobs_are_quarantined_without_imputation(
     for shard_index, shard in enumerate(shards):
         lines = [
             _response_line(
-                missing_label="E" if shard_index == 3 and index == 2 else None
+                missing_label="E" if shard_index == 3 and index == 2 else None,
+                request=request,
             )
-            for index, _ in enumerate(shard)
+            for index, request in enumerate(shard)
         ]
         path = tmp_path / f"responses-{shard_index:02d}.jsonl"
         path.write_bytes(b"\n".join(lines) + b"\n")
@@ -770,6 +800,64 @@ def test_incomplete_logprobs_are_quarantined_without_imputation(
     assert len(quarantined[0].raw_response_sha256) == 64
     with pytest.raises(VertexSensoryBatchError, match="exactly 48"):
         project_ready_records(parsed, expected_cocktails=1)
+
+
+def test_echoed_request_identity_allows_line_and_shard_reordering(
+    actual_corpus: tuple[
+        tuple[FrozenCocktail, ...],
+        tuple[tuple[SensoryBatchRequest, ...], ...],
+    ],
+    tmp_path: Path,
+) -> None:
+    rows, _ = actual_corpus
+    manifest, shards = _partial_manifest(rows[0])
+    requests = [request for shard in shards for request in shard]
+    reordered = list(
+        reversed([_response_line(request=request) for request in requests])
+    )
+    output_paths: list[Path] = []
+    for output_index in range(SHARD_COUNT):
+        path = tmp_path / f"reordered-{output_index:02d}.jsonl"
+        selected = reordered[output_index::SHARD_COUNT]
+        path.write_bytes(b"\n".join(selected) + b"\n")
+        output_paths.append(path)
+
+    parsed, quarantined = parse_recorded_outputs(manifest, output_paths)
+
+    assert len(parsed) == 48
+    assert quarantined == ()
+    assert [(row.cocktail_id, row.axis_order) for row in parsed] == [
+        (rows[0].cocktail_id, axis_order) for axis_order in range(48)
+    ]
+
+
+@pytest.mark.parametrize("tamper", ["duplicate", "config"])
+def test_echoed_request_duplicate_missing_or_config_mismatch_fails_closed(
+    actual_corpus: tuple[
+        tuple[FrozenCocktail, ...],
+        tuple[tuple[SensoryBatchRequest, ...], ...],
+    ],
+    tmp_path: Path,
+    tamper: str,
+) -> None:
+    rows, _ = actual_corpus
+    manifest, shards = _partial_manifest(rows[0])
+    lines = [_response_line(request=request) for shard in shards for request in shard]
+    if tamper == "duplicate":
+        lines[-1] = lines[0]
+    else:
+        decoded = json.loads(lines[-1])
+        decoded["request"]["generationConfig"]["temperature"] = 0.0
+        lines[-1] = json.dumps(decoded, separators=(",", ":")).encode()
+    output_paths: list[Path] = []
+    for output_index in range(SHARD_COUNT):
+        path = tmp_path / f"tampered-{output_index:02d}.jsonl"
+        selected = lines[output_index::SHARD_COUNT]
+        path.write_bytes(b"\n".join(selected) + b"\n")
+        output_paths.append(path)
+
+    with pytest.raises(VertexSensoryBatchError, match="missing"):
+        parse_recorded_outputs(manifest, output_paths)
 
 
 def test_projection_requires_registry_axis_order_not_only_48_axis_ids() -> None:
