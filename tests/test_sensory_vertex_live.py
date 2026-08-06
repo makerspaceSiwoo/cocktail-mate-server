@@ -53,6 +53,7 @@ from app.sensory_embedding.vertex_live import (
     UNKNOWN_REMOTE_STATE,
     AdcIdentity,
     AmbiguousRemoteCreateError,
+    DedicatedBucketContract,
     GoogleBatchGateway,
     GoogleStorageGateway,
     RemoteJob,
@@ -63,6 +64,14 @@ from app.sensory_embedding.vertex_live import (
     refresh_job_status,
     submit_pilot_shard_once,
     submit_shard_once,
+)
+
+_TEST_DEDICATED_BUCKET = DedicatedBucketContract(
+    name=(
+        f"cm-sensory-{hashlib.sha256(DEFAULT_PROJECT.encode()).hexdigest()[:10]}-"
+        f"{'0' * 32}"
+    ),
+    location=BUCKET_LOCATION,
 )
 
 
@@ -491,6 +500,7 @@ def test_live_pilot_scope_requires_marker_and_never_enters_full_create(
             manifest_path=pilot_path,
             ledger_path=ledger_path,
             shard_index=0,
+            dedicated_bucket=_TEST_DEDICATED_BUCKET,
             credential_loader=forbidden_adc,
         )
     assert missing.value.phase == "authorization"
@@ -502,6 +512,7 @@ def test_live_pilot_scope_requires_marker_and_never_enters_full_create(
             manifest_path=pilot_path,
             ledger_path=ledger_path,
             shard_index=0,
+            dedicated_bucket=_TEST_DEDICATED_BUCKET,
             credential_loader=forbidden_adc,
         )
     assert wrong_marker.value.phase == "offline_gate"
@@ -535,6 +546,7 @@ def test_live_pilot_creates_only_one_60_record_shard_attempt(
         manifest_path=pilot_path,
         ledger_path=ledger_path,
         shard_index=0,
+        dedicated_bucket=_TEST_DEDICATED_BUCKET,
         credential_loader=_identity,
         storage_factory=lambda credentials: storage,
         batch_factory=lambda credentials: batch,
@@ -587,6 +599,7 @@ def test_pilot_content_cannot_be_rebound_with_all_self_consistent_hashes(
             manifest_path=pilot_path,
             ledger_path=tmp_path / "ledger.json",
             shard_index=0,
+            dedicated_bucket=_TEST_DEDICATED_BUCKET,
             credential_loader=forbidden_adc,
         )
 
@@ -723,6 +736,7 @@ def test_submit_uses_exact_boundary_once_and_isolates_api_keys(
         {
             "project": DEFAULT_PROJECT,
             "bucket_prefix": storage.upload_calls[0]["bucket"][:-32],
+            "expected_bucket": None,
             "location": BUCKET_LOCATION,
             "lifecycle_days": 1,
             "permissions": tuple(sorted(REQUIRED_GCS_PERMISSIONS)),
@@ -1160,6 +1174,7 @@ def test_concrete_storage_upload_uses_generation_zero_precondition(
     bucket = gateway.find_compatible_bucket(
         project=DEFAULT_PROJECT,
         bucket_prefix="cm-sensory-test-",
+        expected_bucket=None,
         location=BUCKET_LOCATION,
         lifecycle_days=1,
         permissions=tuple(sorted(REQUIRED_GCS_PERMISSIONS)),

@@ -150,12 +150,19 @@ class StorageObject:
     size: int
 
 
+@dataclass(frozen=True, slots=True)
+class DedicatedBucketContract:
+    name: str
+    location: str
+
+
 class StorageGateway(Protocol):
     def find_compatible_bucket(
         self,
         *,
         project: str,
         bucket_prefix: str,
+        expected_bucket: str | None,
         location: str,
         lifecycle_days: int,
         permissions: Sequence[str],
@@ -385,6 +392,7 @@ class GoogleStorageGateway:
         *,
         project: str,
         bucket_prefix: str,
+        expected_bucket: str | None,
         location: str,
         lifecycle_days: int,
         permissions: Sequence[str],
@@ -422,6 +430,7 @@ class GoogleStorageGateway:
             if isinstance(item, Mapping)
             and isinstance(item.get("name"), str)
             and str(item["name"]).startswith(bucket_prefix)
+            and (expected_bucket is None or item["name"] == expected_bucket)
             and str(item.get("location", "")).upper() == location.upper()
             and item.get("lifecycle") == lifecycle
         )
@@ -742,6 +751,55 @@ def _load_manifest(path: Path) -> tuple[dict[str, Any], str]:
     return manifest, sha256_bytes(payload)
 
 
+def load_dedicated_bucket_contract(
+    path: Path,
+    *,
+    manifest_sha256: str,
+) -> DedicatedBucketContract:
+    """Load a local reviewed destination contract without exposing its name."""
+
+    try:
+        if path.stat().st_mode & 0o777 != 0o600:
+            raise VertexLiveError(
+                "dedicated bucket contract must have mode 0600",
+                phase="bucket_contract",
+            )
+        raw = json.loads(path.read_text(encoding="utf-8"))
+    except VertexLiveError:
+        raise
+    except (OSError, UnicodeError, json.JSONDecodeError) as error:
+        raise VertexLiveError(
+            "cannot load dedicated bucket contract",
+            phase="bucket_contract",
+        ) from error
+    if not isinstance(raw, Mapping):
+        raise VertexLiveError(
+            "dedicated bucket contract is invalid",
+            phase="bucket_contract",
+        )
+    name = raw.get("bucket_name")
+    location = raw.get("location")
+    valid = (
+        _is_compatible_bucket_name(name)
+        and isinstance(location, str)
+        and bool(location)
+        and raw.get("bucket_name_sha256") == _sha256_text(str(name))
+        and raw.get("project_id") == PROJECT
+        and raw.get("manifest_sha256") == manifest_sha256
+        and raw.get("lifecycle_delete_age_days") == GCS_LIFECYCLE_DAYS
+        and raw.get("uniform_bucket_level_access") is True
+        and raw.get("public_access_prevention") == "enforced"
+        and raw.get("object_count") == 0
+        and raw.get("outcome") == "created"
+    )
+    if not valid:
+        raise VertexLiveError(
+            "dedicated bucket contract does not match the approved pilot",
+            phase="bucket_contract",
+        )
+    return DedicatedBucketContract(name=str(name), location=str(location))
+
+
 def _bucket_name(manifest_sha256: str) -> str:
     return f"cm-sensory-{_sha256_text(PROJECT)[:10]}-{manifest_sha256[:32]}"
 
@@ -772,6 +830,7 @@ def _new_ledger(
     now: str,
     run_scope: str,
     shard_record_count: int,
+    dedicated_bucket_name: str | None,
 ) -> dict[str, Any]:
     run_id = manifest.get("run_id")
     if not isinstance(run_id, str) or not run_id:
@@ -787,9 +846,13 @@ def _new_ledger(
         "shard_record_count": shard_record_count,
         "historical_cost_usd": "0.00",
         "bucket": {
-            "name": None,
+            "name": dedicated_bucket_name,
             "state": EXISTING_BUCKET_REQUIRED,
-            "ownership": "EXISTING_SHARED",
+            "ownership": (
+                "DEDICATED_PROJECT"
+                if dedicated_bucket_name is not None
+                else "EXISTING_SHARED"
+            ),
             "created_at": now,
             "updated_at": now,
         },
@@ -838,12 +901,13 @@ def _validate_ledger_structure(ledger: Mapping[str, Any]) -> None:
         or (
             bucket.get("state") == EXISTING_BUCKET_REQUIRED
             and bucket.get("name") is not None
+            and not _is_compatible_bucket_name(bucket.get("name"))
         )
         or (
             bucket.get("state") != EXISTING_BUCKET_REQUIRED
             and not _is_compatible_bucket_name(bucket.get("name"))
         )
-        or bucket.get("ownership") != "EXISTING_SHARED"
+        or bucket.get("ownership") not in {"EXISTING_SHARED", "DEDICATED_PROJECT"}
         or bucket.get("state")
         not in {
             EXISTING_BUCKET_REQUIRED,
@@ -1376,6 +1440,7 @@ def submit_shard_once(
     clock: Clock = utc_now,
     _run_scope: str = FULL_RUN_SCOPE,
     _user_approval_marker: str = "",
+    _dedicated_bucket: DedicatedBucketContract | None = None,
 ) -> dict[str, Any]:
     """Upload one immutable shard and create its Batch job exactly once."""
 
@@ -1432,6 +1497,9 @@ def submit_shard_once(
                     if _run_scope == FULL_RUN_SCOPE
                     else LIVE_PILOT_SHARD_SIZE
                 ),
+                dedicated_bucket_name=(
+                    _dedicated_bucket.name if _dedicated_bucket is not None else None
+                ),
             )
 
         if ledger.get("run_scope", FULL_RUN_SCOPE) != _run_scope:
@@ -1479,7 +1547,16 @@ def submit_shard_once(
                         selected_bucket_name = storage.find_compatible_bucket(
                             project=PROJECT,
                             bucket_prefix=_bucket_prefix(),
-                            location=BUCKET_LOCATION,
+                            expected_bucket=(
+                                _dedicated_bucket.name
+                                if _dedicated_bucket is not None
+                                else None
+                            ),
+                            location=(
+                                _dedicated_bucket.location
+                                if _dedicated_bucket is not None
+                                else BUCKET_LOCATION
+                            ),
                             lifecycle_days=GCS_LIFECYCLE_DAYS,
                             permissions=tuple(sorted(REQUIRED_GCS_PERMISSIONS)),
                         )
@@ -1665,6 +1742,7 @@ def submit_pilot_shard_once(
     manifest_path: Path,
     ledger_path: Path,
     shard_index: int,
+    dedicated_bucket: DedicatedBucketContract | None = None,
     credential_loader: CredentialLoader = load_service_account_adc,
     storage_factory: StorageFactory = _default_storage_factory,
     batch_factory: BatchFactory = _default_batch_factory,
@@ -1676,6 +1754,11 @@ def submit_pilot_shard_once(
         raise VertexLiveError(
             f"pilot network access is disabled without {LIVE_PILOT_FLAG}",
             phase="authorization",
+        )
+    if dedicated_bucket is None:
+        raise VertexLiveError(
+            "pilot requires an explicit dedicated bucket contract",
+            phase="bucket_contract",
         )
     return submit_shard_once(
         execute_live=True,
@@ -1689,6 +1772,7 @@ def submit_pilot_shard_once(
         clock=clock,
         _run_scope=PILOT_RUN_SCOPE,
         _user_approval_marker=user_approval_marker,
+        _dedicated_bucket=dedicated_bucket,
     )
 
 

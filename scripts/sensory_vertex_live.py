@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 from collections.abc import Sequence
 from pathlib import Path
@@ -13,6 +14,7 @@ from app.sensory_embedding.vertex_live import (
     VertexLiveError,
     cleanup_run,
     download_outputs,
+    load_dedicated_bucket_contract,
     refresh_job_status,
     submit_pilot_shard_once,
     submit_shard_once,
@@ -42,6 +44,7 @@ def _parser() -> argparse.ArgumentParser:
     pilot_create.add_argument(LIVE_PILOT_FLAG, action="store_true")
     pilot_create.add_argument("--user-approval-marker", required=True)
     pilot_create.add_argument("--manifest", type=Path, required=True)
+    pilot_create.add_argument("--dedicated-bucket-file", type=Path, required=True)
     pilot_create.add_argument("--ledger", type=Path, required=True)
     pilot_create.add_argument("--shard-index", type=int, required=True)
 
@@ -80,12 +83,19 @@ def main(argv: Sequence[str] | None = None) -> int:
                 allow_soft_stop_override=arguments.allow_soft_stop_override,
             )
         elif arguments.command == "pilot-create":
+            manifest_sha256 = hashlib.sha256(
+                arguments.manifest.read_bytes()
+            ).hexdigest()
             result = submit_pilot_shard_once(
                 execute_live_pilot=arguments.execute_live_pilot,
                 user_approval_marker=arguments.user_approval_marker,
                 manifest_path=arguments.manifest,
                 ledger_path=arguments.ledger,
                 shard_index=arguments.shard_index,
+                dedicated_bucket=load_dedicated_bucket_contract(
+                    arguments.dedicated_bucket_file,
+                    manifest_sha256=manifest_sha256,
+                ),
             )
         elif arguments.command == "status":
             result = refresh_job_status(
