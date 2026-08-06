@@ -39,8 +39,9 @@ under review rather than resubmitting the same operation.
 
 ### 2026-08-06 capability attempt
 
-The approved one-record synthetic Batch capability path was invoked once with
-service-account ADC. It stopped at the first Cloud Storage operation:
+The approved one-record synthetic Batch capability path was invoked with
+service-account ADC before, and once again after the user reported granting
+Storage Admin. Both attempts stopped at the first Cloud Storage operation:
 
 ```text
 status: LIVE_BLOCKED
@@ -51,6 +52,12 @@ missing permission: storage.buckets.list
 No request JSONL was uploaded, no Vertex Batch job was created, no job ID or
 logprobs result exists, and no Vertex model charge was incurred. Do not repeat
 the same call until IAM state changes.
+
+The post-grant read-only bucket-list check also returned HTTP 403. ADC resolved
+to project `gen-lang-client-0477982146` and service account
+`cocktail-mate-logprobs@gen-lang-client-0477982146.iam.gserviceaccount.com`.
+Therefore the project-level binding for that exact principal must be confirmed;
+a bucket-level grant does not provide project bucket-list/create access.
 
 For the dedicated create/use/delete bucket workflow in this adapter, the
 simplest temporary project-level grant is `roles/storage.admin` on
